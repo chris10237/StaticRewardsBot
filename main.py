@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 import logging
-from dotenv import load_dotenv
+#from dotenv import load_dotenv
 import os
 import asyncio
 import threading
@@ -47,16 +47,6 @@ async def on_ready():
     print("Commands synced successfully!")
     print("---------------------------------------------")
     print("Only slash commands will work now (e.g., /hello).")
-
-@bot.tree.command(
-    guild=discord.Object(id=GUILD_ID), # Associates this command ONLY with your test server
-    name="hello", 
-    description="Says hello back to the user!"
-)
-async def hello(interaction: discord.Interaction):
-    """Says hello back to the user."""
-    # When using tree.command, you must respond to the interaction directly.
-    await interaction.response.send_message(f"Hello, {interaction.user.name}! AAAAAAAAAAAAAAAA!! (This was a slash command response!)", ephemeral=False)
 
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID), # Associates this command ONLY with your test server
