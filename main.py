@@ -3,11 +3,12 @@ from discord.ext import commands
 import os
 import asyncio
 from flask import Flask
-import threading # <-- We use threading to safely run the bot
+import threading 
 
-# --- Configuration & Bot Setup ---
-# NOTE: Ensure DISCORD_TOKEN and GUILD_ID are set in Render's environment variables.
+# --- 1. Configuration & Bot Setup ---
+# Load environment variables. IMPORTANT: These MUST be set in Render's dashboard.
 token = os.getenv('DISCORD_TOKEN')
+# Replace with your actual Guild ID
 GUILD_ID = 559879519087886356 
 
 # Intents
@@ -17,7 +18,7 @@ intents.members = True
 
 bot = commands.Bot(command_prefix=None, intents = intents)
 
-# --- Discord Bot Events and Commands ---
+# --- 2. Discord Bot Events and Commands ---
 
 @bot.event
 async def on_ready():
@@ -42,7 +43,7 @@ async def hello_command(interaction: discord.Interaction):
     # Defer the response immediately to beat the 3-second timeout
     await interaction.response.defer(ephemeral=False)
     
-    # Simulate a small task delay (ensure it's not the cause of the timeout)
+    # Simulate a small task delay
     await asyncio.sleep(0.5) 
     
     # Use followup.send() after deferring
@@ -59,32 +60,40 @@ async def goodbye_command(interaction: discord.Interaction):
     await asyncio.sleep(0.5) 
     await interaction.followup.send(f"fuk u {interaction.user.name}! (Goodbye message)", ephemeral=False)
 
-# --- Flask Web Server Setup ---
+# --- 3. Flask Web Server Setup ---
 app = Flask(__name__) # The Flask application instance is named 'app'
 
-# --- Discord Bot Runner Function ---
+# --- 4. Discord Bot Runner Function (Revised for Stability) ---
 def start_bot():
     """Starts the Discord bot client in a dedicated thread."""
     print("Starting Discord Bot in a new thread...")
     try:
         # bot.run() is a blocking call, so it must be run in a separate thread.
-        bot.run(token)
+        # log_handler=None helps prevent the 'was never awaited' warning on shutdown.
+        bot.run(token, log_handler=None) 
+    except discord.LoginFailure:
+        print("FATAL ERROR: Bot login failed. Check your DISCORD_TOKEN.")
     except Exception as e:
-        print(f"Error running Discord Bot: {e}")
+        # Catching startup errors, letting benign shutdown errors (like the RuntimeWarning) pass silently.
+        print(f"FATAL STARTUP ERROR: {e}")
 
-# --- Flask Bot Integration (The Critical Part) ---
+# --- 5. Flask Bot Integration (The Critical Launch Point) ---
 @app.before_request
 def run_bot_on_start():
     """Launches the bot thread right before the web server begins serving."""
-    # The Gunicorn worker process will execute this once before serving requests.
-    t = threading.Thread(target=start_bot)
-    t.start()
-    print("Discord Bot thread initiated successfully.")
+    # We check if the thread is already running to avoid launching it multiple times
+    # in environments where before_request might be hit prematurely.
+    if not any(t.name == "discord_bot_thread" for t in threading.enumerate()):
+        t = threading.Thread(target=start_bot, name="discord_bot_thread")
+        t.start()
+        print("Discord Bot thread initiated successfully.")
 
 @app.route('/')
 def home():
-    # This endpoint confirms to Render that the web service is running.
+    """Health check endpoint required by Render."""
     return "Discord Bot is Online and Healthy!"
 
-# --- No if __name__ == '__main__': block is needed! ---
-# Gunicorn handles the startup by importing and running the 'app' instance directly.
+# --- Final Instructions for Deployment ---
+# 1. Save this code as 'main.py'.
+# 2. Set the Render Start Command to: 
+#    gunicorn --worker-class gevent --bind 0.0.0.0:$PORT main:app
