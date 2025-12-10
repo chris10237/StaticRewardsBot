@@ -73,7 +73,7 @@ def start_bot():
         print(f"Error running Discord Bot: {e}")
 
 # --- Flask Bot Integration (The Critical Part) ---
-@app.before_first_request
+@app.before_request
 def run_bot_on_start():
     """Launches the bot thread right before the web server begins serving."""
     # The Gunicorn worker process will execute this once before serving requests.
