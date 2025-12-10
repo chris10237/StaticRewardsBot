@@ -52,6 +52,8 @@ async def on_ready():
 )
 async def hello(interaction: discord.Interaction):
     """Says hello back to the user."""
+    await interaction.response.defer(ephemeral=False)
+    await asyncio.sleep(2)
     # When using tree.command, you must respond to the interaction directly.
     await interaction.response.send_message(f"fuk u {interaction.user.name}! AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", ephemeral=False)
 
