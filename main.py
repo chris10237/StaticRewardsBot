@@ -4,11 +4,8 @@ import logging
 #from dotenv import load_dotenv
 import os
 import asyncio
-import threading
 
 from flask import Flask
-import nest_asyncio
-nest_asyncio.apply() # This patches the event loop
 
 app = Flask(__name__)
 
@@ -57,10 +54,29 @@ async def hello(interaction: discord.Interaction):
     """Says hello back to the user."""
     # When using tree.command, you must respond to the interaction directly.
     await interaction.response.send_message(f"fuk u {interaction.user.name}! AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", ephemeral=False)
-  
+
+async def start_web_server_async():
+    """Runs the Flask server in a separate thread managed by the bot's event loop."""
+    print("Starting Flask web server on a background thread...")
+    # This runs the blocking run_web_server function in a separate thread.
+    # It will not block the bot's main asyncio loop.
+    await asyncio.to_thread(run_web_server)
+    print("Flask web server stopped.")    
+
 def run_discord_bot():
+    """Starts the bot and the web server concurrently."""
+    print("Starting Discord Bot...")
+    # 1. Prepare to run the web server task
     try:
+        # 2. Get the current event loop
+        loop = asyncio.get_event_loop()
+        
+        # 3. Create the task for the web server
+        web_server_task = loop.create_task(start_web_server_async())
+        
+        # 4. Start the bot (bot.run is a blocking call that runs the event loop)
         bot.run(token)
+        
     except RuntimeError as e:
         if "Cannot call write() on a closed stream" in str(e):
             print("Bot stopped successfully despite minor stream error during shutdown.")
@@ -69,13 +85,5 @@ def run_discord_bot():
 
         
 if __name__ == '__main__':
-    # 1. Start the Flask web server in a separate background thread
-    web_thread = threading.Thread(target=run_web_server)
-    web_thread.daemon = True # Allows the thread to exit when the main program exits
-    web_thread.start()
-    
-    # 2. Start the Discord bot in the main thread
-    # NOTE: Since the web server is running in a thread, the main thread is free
-    # to be taken over by Gunicorn/the main process loop.
     run_discord_bot()
         
