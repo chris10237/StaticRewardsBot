@@ -4,10 +4,10 @@ import os
 import asyncio
 from flask import Flask
 import threading
-import psycopg2 # <--- NEW: Import for PostgreSQL driver
-import urllib.parse # <--- NEW: Import for parsing the URL
+import psycopg2 
+import urllib.parse 
 
-from discord import app_commands # Add this line to the top of your file
+from discord import app_commands 
 # ... (all your existing imports)
 
 # --- REWARD CHOICES CONSTANT ---
@@ -22,7 +22,7 @@ REWARD_CHOICES = [
 # --- 1. Configuration & Bot Setup ---
 # Load environment variables. IMPORTANT: These MUST be set in Render's dashboard.
 token = os.getenv('DISCORD_TOKEN')
-DATABASE_URL = os.getenv('DATABASE_URL') # <--- NEW: Get the database URL
+DATABASE_URL = os.getenv('DATABASE_URL')
 # Replace with your actual Guild ID
 GUILD_ID = 559879519087886356
 # For adding and removing rewards
@@ -52,8 +52,7 @@ def get_db_connection():
 
 def setup_db():
     """
-    Creates the 'users' table if it doesn't already exist.
-    (Twitch username is now standard VARCHAR for app-layer case enforcement).
+    Creates the 'users' table if it doesn't already exist and ensures columns and constraints.
     """
     conn = get_db_connection()
     if not conn:
@@ -61,39 +60,56 @@ def setup_db():
 
     cursor = conn.cursor()
     try:
-        # 1. Create the main 'users' table if it doesn't exist.
-        # NOTE: twitch_username is now VARCHAR(50) and NOT UNIQUE.
+        # 1. Create the main 'users' table if it doesn't exist, 
+        #    enforcing UNIQUE constraint on twitch_username.
         create_table_query = """
         CREATE TABLE IF NOT EXISTS users (
             discord_id BIGINT PRIMARY KEY,
-            twitch_username VARCHAR(50) NOT NULL
+            twitch_username VARCHAR(50) NOT NULL UNIQUE
         );
         """
         cursor.execute(create_table_query)
         
-        # 2. Add Reward Columns (Keep your existing column addition logic)
-        # ... (Your existing ALTER TABLE code for reward columns goes here) ...
-            
+        # 2. Ensure the UNIQUE constraint is added even if the table pre-existed.
+        try:
+            # Add unique constraint if it doesn't exist. This handles existing tables.
+            cursor.execute("""
+                ALTER TABLE users 
+                ADD CONSTRAINT unique_twitch_username UNIQUE (twitch_username);
+            """)
+        except psycopg2.errors.DuplicateTable:
+            conn.rollback() 
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback() 
+        except psycopg2.errors.ProgrammingError as pe:
+            # Often raised if constraint already exists and we try to add it
+            if 'already exists' in str(pe):
+                conn.rollback()
+            else:
+                raise pe # Reraise if it's a different error
+        
+        # 3. Add Reward Columns (Keep your existing column addition logic)
+        
         # Add 'free_points_reward_count'
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN free_points_reward_count INT DEFAULT 0;")
-        except psycopg2.ProgrammingError:
-            conn.rollback() 
-        
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+            
         # Add 'free_tier_list_count'
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN free_tier_list_count INT DEFAULT 0;")
-        except psycopg2.ProgrammingError:
-            conn.rollback() 
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
 
         # Add 'free_watch_video_count'
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN free_watch_video_count INT DEFAULT 0;")
-        except psycopg2.ProgrammingError:
+        except psycopg2.errors.DuplicateColumn:
             conn.rollback()
             
         conn.commit()
-        print("Database table 'users' and columns ensured to exist.")
+        print("Database table 'users', unique constraint, and columns ensured to exist.")
     except Exception as e:
         print(f"Error setting up database table or columns: {e}")
     finally:
@@ -102,7 +118,8 @@ def setup_db():
 
 def save_user_registration(discord_id: int, twitch_username: str):
     """
-    Saves or updates the user's registration data using PostgreSQL's ON CONFLICT.
+    Saves or updates the user's registration data using PostgreSQL's ON CONFLICT 
+    (Upsert). Will fail if the twitch_username already exists due to the UNIQUE constraint.
     """
     conn = get_db_connection()
     if not conn:
@@ -110,34 +127,39 @@ def save_user_registration(discord_id: int, twitch_username: str):
 
     cursor = conn.cursor()
     try:
-        # Use INSERT INTO ... ON CONFLICT (target_column) DO UPDATE SET ...
-        # The conflict target is discord_id, as it is the PRIMARY KEY.
+        # Use INSERT INTO ... ON CONFLICT (discord_id) DO UPDATE 
+        # to handle existing users updating their name (PK conflict).
         upsert_query = """
         INSERT INTO users (discord_id, twitch_username) 
         VALUES (%s, %s)
         ON CONFLICT (discord_id) DO UPDATE
         SET twitch_username = EXCLUDED.twitch_username;
         """
-        # Note: EXCLUDED.twitch_username refers to the value we attempted to insert.
         
         cursor.execute(upsert_query, (discord_id, twitch_username))
         
         conn.commit()
         
-        # We can't easily know if it was an INSERT or UPDATE without extra logic, 
-        # but the operation was successful either way.
         return True, "Registration successful (linked or updated)."
             
+    except psycopg2.errors.UniqueViolation as e:
+        conn.rollback()
+        # This exception is now explicitly caused by the UNIQUE constraint 
+        # on twitch_username if it's a conflict other than the discord_id.
+        return False, f"The Twitch name **{twitch_username}** is already registered by another user. Please choose a unique name."
+
     except Exception as e:
         conn.rollback()
+        # Log the full error for debugging
         print(f"FATAL ERROR saving registration for {discord_id}: {e}")
-        return False, f"An unexpected database error occurred during registration. Please alert the bot owner. Error: {e}"
+        return False, f"An unexpected database error occurred during registration. Please alert the bot owner. Error details: {e}"
             
     finally:
         cursor.close()
         conn.close()
 
 def get_user_registration(discord_id: int):
+    # ... (No changes here, function remains the same) ...
     """Retrieves the user's registration data from the database."""
     conn = get_db_connection()
     if not conn:
@@ -153,11 +175,11 @@ def get_user_registration(discord_id: int):
         cursor.execute(select_query, (discord_id,))
         
         # fetchone() returns the next row as a tuple (or None if no row is found)
-        result = cursor.fetchone() 
+        result = cursor.fetchone()
         
         # If a result is found, return the username (which is the first element of the tuple)
         if result:
-            return result[0] 
+            return result[0]
         else:
             return None # User not found
             
@@ -170,6 +192,7 @@ def get_user_registration(discord_id: int):
         conn.close()
 
 def increment_user_reward(twitch_username: str, reward_column: str):
+    # ... (No changes here, function remains the same) ...
     """Increments the count for a specific reward column for a given user."""
     twitch_username = twitch_username.lower()
     conn = get_db_connection()
@@ -202,7 +225,7 @@ def increment_user_reward(twitch_username: str, reward_column: str):
         UPDATE users 
         SET {reward_column} = {reward_column} + 1 
         WHERE discord_id = %s
-        RETURNING {reward_column}; 
+        RETURNING {reward_column};
         """
         
         cursor.execute(update_query, (discord_id,))
@@ -232,24 +255,24 @@ class TwitchRegistrationModal(discord.ui.Modal, title='Register Your Twitch'):
         style=discord.TextStyle.short
     )
     
-    # <--- FIX IS HERE: This method must be indented inside the class! 
-    async def on_submit(self, interaction: discord.Interaction): 
+    # *** FIX APPLIED: This method is now correctly indented inside the class ***
+    async def on_submit(self, interaction: discord.Interaction):
         """Called when the user submits the modal form."""
-        await interaction.response.defer(ephemeral=True) 
+        await interaction.response.defer(ephemeral=True)
         
         # Get the input value and convert it to lowercase for storage
         twitch_name_raw = self.twitch_username_input.value.strip()
-        twitch_name = twitch_name_raw.lower() # <-- NEW: Convert to lowercase
+        twitch_name = twitch_name_raw.lower() # Convert to lowercase for DB storage
         discord_id = interaction.user.id
         
         # Save the data (handle the status returned by the DB function)
-        success, message = save_user_registration(discord_id, twitch_name) # <-- Use lowercase name
+        success, message = save_user_registration(discord_id, twitch_name) # Use lowercase name
         
         # Send confirmation or error based on the result
         if success:
             await interaction.followup.send(
-                # Use the original (raw) name for display, but confirm the stored name is lowercase
-                f"✅ **Success!** Your Twitch username (`{twitch_name_raw}`) has been registered and linked to your Discord account. (Stored as `{twitch_name}`)",
+                # Use the original (raw) name for display
+                f"✅ **Success!** Your Twitch username (`{twitch_name_raw}`) has been registered and linked to your Discord account.",
                 ephemeral=True
             )
         else:
@@ -265,7 +288,7 @@ async def on_ready():
     """Called when the bot connects to Discord."""
     print(f"Bot connected as {bot.user.name} ({bot.user.id})")
 
-    # --- NEW: Setup the database connection and table on startup ---
+    # --- Setup the database connection and table on startup ---
     setup_db()
     # -----------------------------------------------------------------
     
@@ -277,7 +300,7 @@ async def on_ready():
         print(f"failed to sync commands: {e}")
     print("---------------------------------------------")
 
-# --- NEW ADMIN COMMAND --- 
+# --- ADMIN COMMAND --- 
 
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID), 
@@ -294,6 +317,7 @@ async def add_reward_command(
     twitch_name: str, 
     reward: app_commands.Choice[str]
 ):
+    # ... (Command logic remains the same) ...
     """Admin command to increment a user's reward count."""
     
     # 1. ADMIN CHECK (Authorization)
@@ -346,6 +370,7 @@ async def register_command(interaction: discord.Interaction):
     description="Shows the Twitch username you have registered with the bot."
 )
 async def get_registration_command(interaction: discord.Interaction):
+    # ... (Command logic remains the same) ...
     """Retrieves and displays the user's registered Twitch username."""
     # Defer the response, but keep it ephemeral (only the user sees the output)
     await interaction.response.defer(ephemeral=True) 
