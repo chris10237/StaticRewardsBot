@@ -86,6 +86,38 @@ def save_user_registration(discord_id: int, twitch_username: str):
         cursor.close()
         conn.close()
 
+def get_user_registration(discord_id: int):
+    """Retrieves the user's registration data from the database."""
+    conn = get_db_connection()
+    if not conn:
+        return None
+
+    cursor = conn.cursor()
+    try:
+        # SQL statement to select the twitch_username for the given discord_id
+        select_query = """
+        SELECT twitch_username FROM users
+        WHERE discord_id = %s;
+        """
+        cursor.execute(select_query, (discord_id,))
+        
+        # fetchone() returns the next row as a tuple (or None if no row is found)
+        result = cursor.fetchone() 
+        
+        # If a result is found, return the username (which is the first element of the tuple)
+        if result:
+            return result[0] 
+        else:
+            return None # User not found
+            
+    except Exception as e:
+        print(f"Error retrieving registration from database: {e}")
+        return None
+        
+    finally:
+        cursor.close()
+        conn.close()
+
 # --- NEW: Discord Modal Implementation ---
 
 class TwitchRegistrationModal(discord.ui.Modal, title='Register Your Twitch'):
@@ -145,6 +177,33 @@ async def register_command(interaction: discord.Interaction):
     """Presents a Modal form to the user to collect their Twitch username."""
     await interaction.response.send_modal(TwitchRegistrationModal())
 
+@bot.tree.command(
+    guild=discord.Object(id=GUILD_ID), 
+    name="my-twitch-name", 
+    description="Shows the Twitch username you have registered with the bot."
+)
+async def get_registration_command(interaction: discord.Interaction):
+    """Retrieves and displays the user's registered Twitch username."""
+    # Defer the response, but keep it ephemeral (only the user sees the output)
+    await interaction.response.defer(ephemeral=True) 
+
+    discord_id = interaction.user.id
+    
+    # 1. Call the new synchronous DB function
+    twitch_name = get_user_registration(discord_id) 
+
+    # 2. Construct and send the response
+    if twitch_name:
+        await interaction.followup.send(
+            f"🔎 **Found it!** Your registered Twitch username is: `{twitch_name}`",
+            ephemeral=True
+        )
+    else:
+        # User is not registered
+        await interaction.followup.send(
+            "❌ **Not Found.** You don't appear to be registered yet. Use `/register` to link your account!",
+            ephemeral=True
+        )
 
 # --- Existing Commands (No changes needed) ---
 
