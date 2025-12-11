@@ -52,7 +52,8 @@ def get_db_connection():
 
 def setup_db():
     """
-    Creates the 'users' table if it doesn't already exist and ensures columns and constraints.
+    Creates the 'users' table if it doesn't already exist and ensures columns and a 
+    case-insensitive unique index on twitch_username.
     """
     conn = get_db_connection()
     if not conn:
@@ -60,7 +61,7 @@ def setup_db():
 
     cursor = conn.cursor()
     try:
-        # 1. Ensure the main 'users' table exists. (Do NOT include UNIQUE here yet)
+        # 1. Ensure the main 'users' table exists.
         create_table_query = """
         CREATE TABLE IF NOT EXISTS users (
             discord_id BIGINT PRIMARY KEY,
@@ -69,22 +70,24 @@ def setup_db():
         """
         cursor.execute(create_table_query)
 
-        # 2. Ensure the UNIQUE constraint on twitch_username exists.
-        # This uses the IF NOT EXISTS clause, which is the safest way to apply a constraint.
+        # 2. Add a CASE-INSENSITIVE UNIQUE INDEX on the lowercase twitch_username.
+        # This is the industry-standard fix for this issue in PostgreSQL.
         try:
             cursor.execute("""
-                ALTER TABLE users 
-                ADD CONSTRAINT unique_twitch_username UNIQUE (twitch_username);
+                CREATE UNIQUE INDEX IF NOT EXISTS 
+                unique_twitch_username_lower 
+                ON users (LOWER(twitch_username));
             """)
-            print("Successfully added 'unique_twitch_username' constraint.")
+            print("Successfully created/ensured case-insensitive unique index on twitch_username.")
         except psycopg2.errors.ProgrammingError as pe:
-            # If the constraint already exists, psycopg2 raises a ProgrammingError 
-            # but we can check the error message and rollback the transaction safely.
-            if 'already exists' in str(pe):
+            # If the index fails to create (e.g., duplicate data exists), this handles it.
+            if 'duplicate key value violates unique constraint' in str(pe):
+                print("FATAL SETUP WARNING: Cannot create unique index. Duplicate data exists (e.g., 'Name' and 'name'). You MUST clean up data manually.")
                 conn.rollback()
-                print("Constraint 'unique_twitch_username' already exists.")
+            elif 'already exists' in str(pe):
+                conn.rollback()
+                print("Case-insensitive unique index already exists.")
             else:
-                # If there's another error, rollback and re-raise.
                 conn.rollback()
                 raise pe 
 
