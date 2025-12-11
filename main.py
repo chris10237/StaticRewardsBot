@@ -65,26 +65,35 @@ def setup_db():
         create_table_query = """
         CREATE TABLE IF NOT EXISTS users (
             discord_id BIGINT PRIMARY KEY,
-            twitch_username VARCHAR(50) NOT NULL UNIQUE
+            twitch_username VARCHAR(50) NOT NULL
         );
         """
         cursor.execute(create_table_query)
         
-        # 2. Ensure the UNIQUE constraint is added even if the table pre-existed.
+        # 2. Ensure the UNIQUE constraint is added.
+        # This is the most reliable way to enforce a unique constraint on an existing table.
         try:
-            # Add unique constraint if it doesn't exist. This handles existing tables.
+            # Check if the constraint exists, and if not, add it.
+            # Using UNIQUE (twitch_username)
             cursor.execute("""
                 ALTER TABLE users 
                 ADD CONSTRAINT unique_twitch_username UNIQUE (twitch_username);
             """)
+            print("Successfully added/ensured 'unique_twitch_username' constraint.")
         except psycopg2.errors.DuplicateTable:
             conn.rollback() 
         except psycopg2.errors.DuplicateColumn:
             conn.rollback() 
         except psycopg2.errors.ProgrammingError as pe:
-            # Often raised if constraint already exists and we try to add it
+            # Check for the common error when the constraint already exists
             if 'already exists' in str(pe):
                 conn.rollback()
+            elif 'could not create unique index' in str(pe):
+                # This means you have duplicate data in your table right now!
+                print("FATAL SETUP WARNING: Duplicate 'twitch_username' data already exists in your table.")
+                conn.rollback()
+                # You might need to manually delete duplicate rows in the database
+                # or rename them if the bot is running on existing data.
             else:
                 raise pe # Reraise if it's a different error
         
