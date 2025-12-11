@@ -7,12 +7,26 @@ import threading
 import psycopg2 # <--- NEW: Import for PostgreSQL driver
 import urllib.parse # <--- NEW: Import for parsing the URL
 
+from discord import app_commands # Add this line to the top of your file
+# ... (all your existing imports)
+
+# --- REWARD CHOICES CONSTANT ---
+REWARD_CHOICES = [
+    discord.app_commands.Choice(name="Free Points Reward", value="free_points_reward_count"),
+    discord.app_commands.Choice(name="Free Tier List Slot", value="free_tier_list_count"),
+    discord.app_commands.Choice(name="Free Watch Video", value="free_watch_video_count"),
+    # Add more rewards here following the 'name': 'database_column_name' structure
+]
+# --- END REWARD CHOICES CONSTANT ---
+
 # --- 1. Configuration & Bot Setup ---
 # Load environment variables. IMPORTANT: These MUST be set in Render's dashboard.
 token = os.getenv('DISCORD_TOKEN')
 DATABASE_URL = os.getenv('DATABASE_URL') # <--- NEW: Get the database URL
 # Replace with your actual Guild ID
 GUILD_ID = 559879519087886356
+# For adding and removing rewards
+ADMIN_USER_ID = 341072622735327232
 
 # Intents
 intents = discord.Intents.default()
@@ -37,14 +51,14 @@ def get_db_connection():
         return None
 
 def setup_db():
-    """Creates the 'users' table if it doesn't already exist."""
+    """Creates the 'users' table and ensures reward columns exist."""
     conn = get_db_connection()
     if not conn:
         return
 
     cursor = conn.cursor()
     try:
-        # SQL command to create the table. discord_id is BIGINT (Discord IDs are large numbers).
+        # 1. Create the main 'users' table if it doesn't exist.
         create_table_query = """
         CREATE TABLE IF NOT EXISTS users (
             discord_id BIGINT PRIMARY KEY,
@@ -52,10 +66,38 @@ def setup_db():
         );
         """
         cursor.execute(create_table_query)
+        
+        # 2. Add Reward Columns if they do not exist (ALTER TABLE commands)
+        # Using separate TRY/EXCEPT blocks for column additions so if one fails, others might still run.
+        
+        # Example Rewards: "free_points", "free_tier_list", "free_watch_video"
+        
+        # Add 'free_points_reward_count'
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN free_points_reward_count INT DEFAULT 0;")
+            print("DB Column Added: free_points_reward_count")
+        except psycopg2.ProgrammingError as e:
+            # Catches the "column "free_points_reward_count" already exists" error
+            conn.rollback() # Rollback the failed ALTER but keep the connection active
+        
+        # Add 'free_tier_list_count'
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN free_tier_list_count INT DEFAULT 0;")
+            print("DB Column Added: free_tier_list_count")
+        except psycopg2.ProgrammingError as e:
+            conn.rollback() 
+
+        # Add 'free_watch_video_count'
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN free_watch_video_count INT DEFAULT 0;")
+            print("DB Column Added: free_watch_video_count")
+        except psycopg2.ProgrammingError as e:
+            conn.rollback()
+            
         conn.commit()
-        print("Database table 'users' ensured to exist.")
+        print("Database table 'users' and reward columns ensured to exist.")
     except Exception as e:
-        print(f"Error setting up database table: {e}")
+        print(f"Error setting up database table or columns: {e}")
     finally:
         cursor.close()
         conn.close()
@@ -118,6 +160,55 @@ def get_user_registration(discord_id: int):
         cursor.close()
         conn.close()
 
+def increment_user_reward(twitch_username: str, reward_column: str):
+    """Increments the count for a specific reward column for a given user."""
+    conn = get_db_connection()
+    if not conn:
+        return False, "Database connection failed."
+    
+    cursor = conn.cursor()
+    try:
+        # IMPORTANT: Column names cannot be parameterized with %s, so we must 
+        # validate the input and format the SQL string. We rely on the calling
+        # function to provide only valid reward_column names.
+        
+        # 1. Look up the discord_id first using the twitch_username
+        cursor.execute("SELECT discord_id FROM users WHERE twitch_username = %s;", (twitch_username,))
+        result = cursor.fetchone()
+        
+        if not result:
+            return False, f"Twitch user '{twitch_username}' not found in the database."
+            
+        discord_id = result[0]
+        
+        # 2. Increment the specified column count
+        # Ensure the column name is safe and valid before formatting the SQL
+        # This is a critical security step for dynamic column names.
+        valid_columns = ['free_points_reward_count', 'free_tier_list_count', 'free_watch_video_count']
+        if reward_column not in valid_columns:
+            return False, f"Invalid reward column name: {reward_column}"
+        
+        update_query = f"""
+        UPDATE users 
+        SET {reward_column} = {reward_column} + 1 
+        WHERE discord_id = %s
+        RETURNING {reward_column}; 
+        """
+        
+        cursor.execute(update_query, (discord_id,))
+        new_count = cursor.fetchone()[0] # Get the updated count
+        conn.commit()
+        
+        return True, f"Reward incremented! New count for '{reward_column}' is **{new_count}**."
+        
+    except Exception as e:
+        print(f"Error incrementing reward for {twitch_username}: {e}")
+        return False, f"An unexpected database error occurred: {e}"
+        
+    finally:
+        cursor.close()
+        conn.close()
+
 # --- NEW: Discord Modal Implementation ---
 
 class TwitchRegistrationModal(discord.ui.Modal, title='Register Your Twitch'):
@@ -167,6 +258,59 @@ async def on_ready():
         print(f"failed to sync commands: {e}")
     print("---------------------------------------------")
 
+# --- NEW ADMIN COMMAND --- 
+
+@bot.tree.command(
+    guild=discord.Object(id=GUILD_ID), 
+    name="add-reward", 
+    description="[ADMIN ONLY] Adds a reward count to a registered user."
+)
+@app_commands.describe(
+    twitch_name="The registered Twitch username of the recipient.",
+    reward="The specific reward to be added."
+)
+@app_commands.choices(reward=REWARD_CHOICES)
+async def add_reward_command(
+    interaction: discord.Interaction, 
+    twitch_name: str, 
+    reward: app_commands.Choice[str]
+):
+    """Admin command to increment a user's reward count."""
+    
+    # 1. ADMIN CHECK (Authorization)
+    if interaction.user.id != ADMIN_USER_ID:
+        await interaction.response.send_message(
+            "🛑 **Authorization Failed.** This command is restricted to the bot owner.", 
+            ephemeral=True
+        )
+        return
+
+    # Defer the response as we are talking to the database
+    await interaction.response.defer(ephemeral=True) 
+    
+    # Get the database column name from the choice value
+    reward_column = reward.value 
+    reward_name = reward.name
+    
+    # 2. Call the new synchronous DB function
+    success, message = increment_user_reward(twitch_name.strip(), reward_column)
+
+    # 3. Send the response
+    if success:
+        await interaction.followup.send(
+            f"✅ **Reward Added!**\n"
+            f"**Recipient:** `{twitch_name}`\n"
+            f"**Reward:** `{reward_name}`\n"
+            f"**Status:** {message}", # The message contains the new count
+            ephemeral=True
+        )
+    else:
+        # This handles Twitch user not found or a database error
+        await interaction.followup.send(
+            f"❌ **Failed to Add Reward**\n"
+            f"**Reason:** {message}",
+            ephemeral=True
+        )
 
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID), 
