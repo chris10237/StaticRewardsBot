@@ -51,51 +51,63 @@ def get_db_connection():
         return None
 
 def setup_db():
-    """Creates the 'users' table and ensures reward columns exist."""
+    """
+    Creates the 'users' table, enables citext for case-insensitive matching,
+    and ensures reward columns exist.
+    """
     conn = get_db_connection()
     if not conn:
         return
 
     cursor = conn.cursor()
     try:
+        # 0. Enable the citext extension for case-insensitive text matching
+        try:
+            cursor.execute("CREATE EXTENSION IF NOT EXISTS citext;")
+            print("Database Extension: 'citext' ensured to exist.")
+        except Exception as e:
+            print(f"Error creating citext extension (may need superuser rights): {e}")
+            conn.rollback() # Rollback the extension attempt if it failed
+
         # 1. Create the main 'users' table if it doesn't exist.
+        # NOTE: We change twitch_username to CITEXT and add a UNIQUE constraint.
         create_table_query = """
         CREATE TABLE IF NOT EXISTS users (
             discord_id BIGINT PRIMARY KEY,
-            twitch_username VARCHAR(50) NOT NULL
+            twitch_username CITEXT UNIQUE NOT NULL 
         );
         """
         cursor.execute(create_table_query)
         
         # 2. Add Reward Columns if they do not exist (ALTER TABLE commands)
-        # Using separate TRY/EXCEPT blocks for column additions so if one fails, others might still run.
         
-        # Example Rewards: "free_points", "free_tier_list", "free_watch_video"
-        
+        # ... (Keep the existing reward column ADDITION logic here) ...
+        # (The reward column addition logic is already correct, but make sure 
+        # it is exactly as you copied from the previous answer.)
+
         # Add 'free_points_reward_count'
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN free_points_reward_count INT DEFAULT 0;")
             print("DB Column Added: free_points_reward_count")
-        except psycopg2.ProgrammingError as e:
-            # Catches the "column "free_points_reward_count" already exists" error
-            conn.rollback() # Rollback the failed ALTER but keep the connection active
+        except psycopg2.ProgrammingError:
+            conn.rollback() 
         
         # Add 'free_tier_list_count'
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN free_tier_list_count INT DEFAULT 0;")
             print("DB Column Added: free_tier_list_count")
-        except psycopg2.ProgrammingError as e:
+        except psycopg2.ProgrammingError:
             conn.rollback() 
 
         # Add 'free_watch_video_count'
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN free_watch_video_count INT DEFAULT 0;")
             print("DB Column Added: free_watch_video_count")
-        except psycopg2.ProgrammingError as e:
+        except psycopg2.ProgrammingError:
             conn.rollback()
             
         conn.commit()
-        print("Database table 'users' and reward columns ensured to exist.")
+        print("Database table 'users', citext, and columns ensured to exist.")
     except Exception as e:
         print(f"Error setting up database table or columns: {e}")
     finally:
@@ -104,14 +116,14 @@ def setup_db():
 
 def save_user_registration(discord_id: int, twitch_username: str):
     """Saves or updates the user's registration data in the database."""
+    # ... (connection logic remains the same) ...
     conn = get_db_connection()
     if not conn:
-        return
+        return False, "Database connection failed." # Return failure status
     
     cursor = conn.cursor()
     try:
-        # This SQL statement inserts a new record. If a record with that discord_id 
-        # already exists, it updates the twitch_username instead.
+        # ... (SQL query remains the same) ...
         insert_update_query = """
         INSERT INTO users (discord_id, twitch_username) 
         VALUES (%s, %s)
@@ -122,8 +134,18 @@ def save_user_registration(discord_id: int, twitch_username: str):
         cursor.execute(insert_update_query, (discord_id, twitch_username))
         conn.commit()
         print(f"DB Action: Discord ID {discord_id} registered/updated with Twitch: {twitch_username}")
+        return True, "Registration successful." # Return success status
+        
+    except psycopg2.errors.UniqueViolation:
+        # Catch the specific error when the twitch_username is already taken
+        conn.rollback() 
+        return False, f"The Twitch name **{twitch_username}** is already registered by another user. Please check for typos."
+
     except Exception as e:
+        conn.rollback()
         print(f"Error saving registration to database: {e}")
+        return False, f"An unexpected error occurred during registration: {e}"
+        
     finally:
         cursor.close()
         conn.close()
@@ -222,7 +244,7 @@ class TwitchRegistrationModal(discord.ui.Modal, title='Register Your Twitch'):
         style=discord.TextStyle.short
     )
     
-    async def on_submit(self, interaction: discord.Interaction):
+async def on_submit(self, interaction: discord.Interaction):
         """Called when the user submits the modal form."""
         await interaction.response.defer(ephemeral=True) # Defer the response immediately
         
@@ -230,14 +252,20 @@ class TwitchRegistrationModal(discord.ui.Modal, title='Register Your Twitch'):
         twitch_name = self.twitch_username_input.value.strip()
         discord_id = interaction.user.id
         
-        # Save the data (using the new DB function)
-        save_user_registration(discord_id, twitch_name)
+        # Save the data (handle the status returned by the DB function)
+        success, message = save_user_registration(discord_id, twitch_name)
         
-        # Send confirmation
-        await interaction.followup.send(
-            f"✅ **Success!** Your Twitch username (`{twitch_name}`) has been registered and linked to your Discord account.",
-            ephemeral=True
-        )
+        # Send confirmation or error based on the result
+        if success:
+             await interaction.followup.send(
+                f"✅ **Success!** Your Twitch username (`{twitch_name}`) has been registered and linked to your Discord account.",
+                ephemeral=True
+            )
+        else:
+            await interaction.followup.send(
+                f"❌ **Registration Failed:** {message}",
+                ephemeral=True
+            )
 
 # --- 2. Discord Bot Events and Commands ---
 
