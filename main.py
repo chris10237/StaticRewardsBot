@@ -70,8 +70,7 @@ def setup_db():
         """
         cursor.execute(create_table_query)
 
-        # 2. Add a CASE-INSENSITIVE UNIQUE INDEX on the lowercase twitch_username.
-        # This is the industry-standard fix for this issue in PostgreSQL.
+        # 2. Add a CASE-INSENSITIVE UNIQUE INDEX.
         try:
             cursor.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS 
@@ -79,19 +78,30 @@ def setup_db():
                 ON users (LOWER(twitch_username));
             """)
             print("Successfully created/ensured case-insensitive unique index on twitch_username.")
+        
         except psycopg2.errors.ProgrammingError as pe:
-            # If the index fails to create (e.g., duplicate data exists), this handles it.
-            if 'duplicate key value violates unique constraint' in str(pe):
-                print("FATAL SETUP WARNING: Cannot create unique index. Duplicate data exists (e.g., 'Name' and 'name'). You MUST clean up data manually.")
-                conn.rollback()
-            elif 'already exists' in str(pe):
-                conn.rollback()
+            conn.rollback() 
+            if 'already exists' in str(pe):
                 print("Case-insensitive unique index already exists.")
             else:
-                conn.rollback()
+                # If any other ProgrammingError (like lacking permissions) occurs, we re-raise.
                 raise pe 
-
+        
+        # --- CRITICAL HANDLING FOR UNIQUE CONSTRAINT VIOLATION ---
+        except psycopg2.errors.UniqueViolation as uv:
+            # This is raised if the index can't be created because of duplicate data.
+            conn.rollback()
+            print("----------------------------------------------------------------------------------")
+            print("!!! FATAL DB SETUP ERROR: UNIQUE CONSTRAINT VIOLATION !!!")
+            print("The case-insensitive index failed because duplicate Twitch names (e.g., 'name' and 'Name') exist in the table.")
+            print("You must manually clean the database using the SQL query below, and then restart the bot.")
+            print("SQL to find duplicates: SELECT LOWER(twitch_username), COUNT(*) FROM users GROUP BY 1 HAVING COUNT(*) > 1;")
+            print("----------------------------------------------------------------------------------")
+            # We exit the function here. The commit is skipped.
+            return
+            
         # 3. Add Reward Columns (Keep your existing, working logic)
+        # (Rollback is fine here since column addition is non-critical)
         
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN free_points_reward_count INT DEFAULT 0;")
@@ -109,7 +119,8 @@ def setup_db():
             conn.rollback()
             
         conn.commit()
-        print("Database table 'users' setup complete.")
+        print("Database table 'users' setup and commit complete.")
+        
     except Exception as e:
         print(f"FATAL ERROR setting up database table or columns: {e}")
     finally:
