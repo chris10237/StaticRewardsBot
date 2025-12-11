@@ -129,8 +129,8 @@ def setup_db():
 
 def save_user_registration(discord_id: int, twitch_username: str):
     """
-    Saves or updates the user's registration data using PostgreSQL's ON CONFLICT 
-    (Upsert). Will fail if the twitch_username already exists due to the UNIQUE constraint.
+    Saves or updates the user's registration data, relying on the UNIQUE INDEX 
+    to reject duplicate twitch_usernames across all users (case-insensitively).
     """
     conn = get_db_connection()
     if not conn:
@@ -138,30 +138,40 @@ def save_user_registration(discord_id: int, twitch_username: str):
 
     cursor = conn.cursor()
     try:
-        # Use INSERT INTO ... ON CONFLICT (discord_id) DO UPDATE 
-        # to handle existing users updating their name (PK conflict).
-        upsert_query = """
-        INSERT INTO users (discord_id, twitch_username) 
-        VALUES (%s, %s)
-        ON CONFLICT (discord_id) DO UPDATE
-        SET twitch_username = EXCLUDED.twitch_username;
-        """
-        
-        cursor.execute(upsert_query, (discord_id, twitch_username))
-        
-        conn.commit()
-        
-        return True, "Registration successful (linked or updated)."
+        # 1. Check if the user is already registered (if discord_id exists)
+        cursor.execute("SELECT discord_id FROM users WHERE discord_id = %s;", (discord_id,))
+        user_exists = cursor.fetchone() is not None
+
+        if user_exists:
+            # 2. If user exists, perform a simple UPDATE.
+            # This UPDATE will FAIL if the new twitch_username conflicts with another row.
+            query = """
+            UPDATE users
+            SET twitch_username = %s
+            WHERE discord_id = %s;
+            """
+            cursor.execute(query, (twitch_username, discord_id))
+            action = "updated"
+        else:
+            # 3. If user is new, perform a simple INSERT.
+            # This INSERT will FAIL if the twitch_username conflicts with an existing row.
+            query = """
+            INSERT INTO users (discord_id, twitch_username)
+            VALUES (%s, %s);
+            """
+            cursor.execute(query, (discord_id, twitch_username))
+            action = "registered"
             
-    except psycopg2.errors.UniqueViolation as e:
+        conn.commit()
+        return True, f"Registration successful (name {action})."
+            
+    except psycopg2.errors.UniqueViolation:
         conn.rollback()
-        # This exception is now explicitly caused by the UNIQUE constraint 
-        # on twitch_username if it's a conflict other than the discord_id.
+        # This is the expected and correct error if the twitch_username is already taken.
         return False, f"The Twitch name **{twitch_username}** is already registered by another user. Please choose a unique name."
 
     except Exception as e:
         conn.rollback()
-        # Log the full error for debugging
         print(f"FATAL ERROR saving registration for {discord_id}: {e}")
         return False, f"An unexpected database error occurred during registration. Please alert the bot owner. Error details: {e}"
             
