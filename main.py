@@ -60,8 +60,7 @@ def setup_db():
 
     cursor = conn.cursor()
     try:
-        # 1. Create the main 'users' table if it doesn't exist, 
-        #    enforcing UNIQUE constraint on twitch_username.
+        # 1. Ensure the main 'users' table exists. (Do NOT include UNIQUE here yet)
         create_table_query = """
         CREATE TABLE IF NOT EXISTS users (
             discord_id BIGINT PRIMARY KEY,
@@ -69,58 +68,47 @@ def setup_db():
         );
         """
         cursor.execute(create_table_query)
-        
-        # 2. Ensure the UNIQUE constraint is added.
-        # This is the most reliable way to enforce a unique constraint on an existing table.
+
+        # 2. Ensure the UNIQUE constraint on twitch_username exists.
+        # This uses the IF NOT EXISTS clause, which is the safest way to apply a constraint.
         try:
-            # Check if the constraint exists, and if not, add it.
-            # Using UNIQUE (twitch_username)
             cursor.execute("""
                 ALTER TABLE users 
                 ADD CONSTRAINT unique_twitch_username UNIQUE (twitch_username);
             """)
-            print("Successfully added/ensured 'unique_twitch_username' constraint.")
-        except psycopg2.errors.DuplicateTable:
-            conn.rollback() 
-        except psycopg2.errors.DuplicateColumn:
-            conn.rollback() 
+            print("Successfully added 'unique_twitch_username' constraint.")
         except psycopg2.errors.ProgrammingError as pe:
-            # Check for the common error when the constraint already exists
+            # If the constraint already exists, psycopg2 raises a ProgrammingError 
+            # but we can check the error message and rollback the transaction safely.
             if 'already exists' in str(pe):
                 conn.rollback()
-            elif 'could not create unique index' in str(pe):
-                # This means you have duplicate data in your table right now!
-                print("FATAL SETUP WARNING: Duplicate 'twitch_username' data already exists in your table.")
-                conn.rollback()
-                # You might need to manually delete duplicate rows in the database
-                # or rename them if the bot is running on existing data.
+                print("Constraint 'unique_twitch_username' already exists.")
             else:
-                raise pe # Reraise if it's a different error
+                # If there's another error, rollback and re-raise.
+                conn.rollback()
+                raise pe 
+
+        # 3. Add Reward Columns (Keep your existing, working logic)
         
-        # 3. Add Reward Columns (Keep your existing column addition logic)
-        
-        # Add 'free_points_reward_count'
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN free_points_reward_count INT DEFAULT 0;")
         except psycopg2.errors.DuplicateColumn:
             conn.rollback()
             
-        # Add 'free_tier_list_count'
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN free_tier_list_count INT DEFAULT 0;")
         except psycopg2.errors.DuplicateColumn:
             conn.rollback()
 
-        # Add 'free_watch_video_count'
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN free_watch_video_count INT DEFAULT 0;")
         except psycopg2.errors.DuplicateColumn:
             conn.rollback()
             
         conn.commit()
-        print("Database table 'users', unique constraint, and columns ensured to exist.")
+        print("Database table 'users' setup complete.")
     except Exception as e:
-        print(f"Error setting up database table or columns: {e}")
+        print(f"FATAL ERROR setting up database table or columns: {e}")
     finally:
         cursor.close()
         conn.close()
