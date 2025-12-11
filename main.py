@@ -102,8 +102,7 @@ def setup_db():
 
 def save_user_registration(discord_id: int, twitch_username: str):
     """
-    Saves or updates the user's registration data in the database. 
-    twitch_username is assumed to be lowercase here.
+    Saves or updates the user's registration data using PostgreSQL's ON CONFLICT.
     """
     conn = get_db_connection()
     if not conn:
@@ -111,50 +110,29 @@ def save_user_registration(discord_id: int, twitch_username: str):
 
     cursor = conn.cursor()
     try:
-        # 1. Attempt to update the user's twitch_username based on their discord_id.
-        # This is for users who are already registered and are updating their name.
-        update_query = """
-        UPDATE users 
-        SET twitch_username = %s 
-        WHERE discord_id = %s;
-        """
-        cursor.execute(update_query, (twitch_username, discord_id))
-        
-        # Check if a row was actually updated (meaning the user was already registered)
-        if cursor.rowcount > 0:
-            conn.commit()
-            print(f"DB Action: Discord ID {discord_id} updated Twitch name to: {twitch_username}")
-            return True, "Registration successful (name updated)."
-        
-        # 2. If no row was updated (rowcount == 0), the user is new. Attempt to insert.
-        # Note: If this INSERT fails, it will be because the twitch_username is already
-        # linked to a *different* discord_id that we missed, or another unique constraint.
-        insert_query = """
+        # Use INSERT INTO ... ON CONFLICT (target_column) DO UPDATE SET ...
+        # The conflict target is discord_id, as it is the PRIMARY KEY.
+        upsert_query = """
         INSERT INTO users (discord_id, twitch_username) 
-        VALUES (%s, %s);
+        VALUES (%s, %s)
+        ON CONFLICT (discord_id) DO UPDATE
+        SET twitch_username = EXCLUDED.twitch_username;
         """
-        cursor.execute(insert_query, (discord_id, twitch_username))
+        # Note: EXCLUDED.twitch_username refers to the value we attempted to insert.
+        
+        cursor.execute(upsert_query, (discord_id, twitch_username))
         
         conn.commit()
-        print(f"DB Action: Discord ID {discord_id} registered with new Twitch name: {twitch_username}")
-        return True, "Registration successful (new user)."
         
-    except psycopg2.errors.UniqueViolation as e:
-        # This catches the primary key (discord_id) conflict ONLY if the update logic failed,
-        # or if you decided to reintroduce a unique index on twitch_username.
-        # For our current schema (PK on discord_id, no UNIQUE on twitch_username), 
-        # this will primarily catch conflicts where the twitch_username is a duplicate
-        # *if* you were to reintroduce the UNIQUE constraint. 
-        # Since we removed the UNIQUE constraint, this should only catch PK violations if the logic above is flawed.
-        conn.rollback() 
-        return False, f"The Twitch name **{twitch_username}** is already registered by another user. (Duplication caught)"
-
+        # We can't easily know if it was an INSERT or UPDATE without extra logic, 
+        # but the operation was successful either way.
+        return True, "Registration successful (linked or updated)."
+            
     except Exception as e:
         conn.rollback()
-        # Log the full error to help debug the "Something Went Wrong" message
         print(f"FATAL ERROR saving registration for {discord_id}: {e}")
         return False, f"An unexpected database error occurred during registration. Please alert the bot owner. Error: {e}"
-        
+            
     finally:
         cursor.close()
         conn.close()
@@ -254,7 +232,8 @@ class TwitchRegistrationModal(discord.ui.Modal, title='Register Your Twitch'):
         style=discord.TextStyle.short
     )
     
-async def on_submit(self, interaction: discord.Interaction):
+    # <--- FIX IS HERE: This method must be indented inside the class! 
+    async def on_submit(self, interaction: discord.Interaction): 
         """Called when the user submits the modal form."""
         await interaction.response.defer(ephemeral=True) 
         
@@ -268,7 +247,7 @@ async def on_submit(self, interaction: discord.Interaction):
         
         # Send confirmation or error based on the result
         if success:
-             await interaction.followup.send(
+            await interaction.followup.send(
                 # Use the original (raw) name for display, but confirm the stored name is lowercase
                 f"✅ **Success!** Your Twitch username (`{twitch_name_raw}`) has been registered and linked to your Discord account. (Stored as `{twitch_name}`)",
                 ephemeral=True
