@@ -132,8 +132,8 @@ def setup_db():
 
 def save_user_registration(discord_id: int, twitch_username: str):
     """
-    Saves or updates the user's registration data, relying on the UNIQUE INDEX 
-    to reject duplicate twitch_usernames across all users (case-insensitively).
+    Saves or updates the user's registration data. It performs a case-insensitive
+    check for duplicate twitch_usernames across all users BEFORE attempting to save.
     """
     conn = get_db_connection()
     if not conn:
@@ -141,11 +141,31 @@ def save_user_registration(discord_id: int, twitch_username: str):
 
     cursor = conn.cursor()
     try:
-        # Use ON CONFLICT to handle both new registration (INSERT) and existing user (UPDATE).
-        # discord_id is the PRIMARY KEY. If it conflicts (user exists), we UPDATE the username.
-        # If the UPDATE/INSERT fails due to a UNIQUE INDEX violation on LOWER(twitch_username), 
-        # it will be caught by the except block below.
-
+        # --- STEP 1: CHECK FOR DUPLICATE TWITCH NAME (Case-Insensitive) ---
+        # This check uses the same logic as the unique index: LOWER()
+        # It ensures no other user (whose discord_id is NOT the current user's)
+        # has this Twitch name registered.
+        
+        # We search for any row where the lowercase twitch_username matches the 
+        # new lowercase input, AND the discord_id does not belong to the current user.
+        twitch_name_lower = twitch_username.lower()
+        
+        check_query = """
+        SELECT discord_id 
+        FROM users 
+        WHERE LOWER(twitch_username) = %s AND discord_id != %s;
+        """
+        cursor.execute(check_query, (twitch_name_lower, discord_id))
+        
+        # If a row is found, a duplicate exists.
+        if cursor.fetchone() is not None:
+            conn.rollback()
+            return False, f"The Twitch name **{twitch_username}** is already registered by another user. Please choose a unique name."
+            
+        # --- STEP 2: PERFORM INSERT/UPDATE (Based on discord_id) ---
+        
+        # Use ON CONFLICT for simplicity, as it handles a new user (INSERT) 
+        # and an existing user (UPDATE) in one query, but ONLY checks the PK.
         query = """
         INSERT INTO users (discord_id, twitch_username)
         VALUES (%s, %s)
@@ -154,11 +174,21 @@ def save_user_registration(discord_id: int, twitch_username: str):
         """
         cursor.execute(query, (discord_id, twitch_username))
 
-        # Check if the user was updated or inserted
+        # Check if the user was updated (rowcount=0) or inserted (rowcount=1)
         action = "updated" if cursor.rowcount == 0 else "registered"
         
         conn.commit()
         return True, f"Registration successful (name {action})."
+            
+    except Exception as e:
+        conn.rollback()
+        # Log unexpected errors (e.g., connection lost)
+        print(f"FATAL ERROR saving registration for {discord_id}: {e}")
+        return False, f"An unexpected database error occurred during registration. Please alert the bot owner."
+            
+    finally:
+        cursor.close()
+        conn.close()
             
     except psycopg2.errors.UniqueViolation:
         conn.rollback()
