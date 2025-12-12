@@ -167,7 +167,7 @@ def save_user_registration(discord_id: int, twitch_username: str):
         # Use ON CONFLICT for simplicity, as it handles a new user (INSERT) 
         # and an existing user (UPDATE) in one query, but ONLY checks the PK.
         query = """
-        INSERT INTO users (discord_id, twitch_username)
+        INSERT INTO users (discord_id, twitch_name_lower)
         VALUES (%s, %s)
         ON CONFLICT (discord_id) DO UPDATE SET
             twitch_username = EXCLUDED.twitch_username;
