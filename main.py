@@ -189,22 +189,6 @@ def save_user_registration(discord_id: int, twitch_username: str):
     finally:
         cursor.close()
         conn.close()
-            
-    except psycopg2.errors.UniqueViolation:
-        conn.rollback()
-        # This is the expected and correct error if the twitch_username is already taken 
-        # by another discord_id due to the case-insensitive index on LOWER(twitch_username).
-        return False, f"The Twitch name **{twitch_username}** is already registered by another user. Please choose a unique name."
-
-    except Exception as e:
-        conn.rollback()
-        # Log unexpected errors
-        print(f"FATAL ERROR saving registration for {discord_id}: {e}")
-        return False, f"An unexpected database error occurred during registration. Please alert the bot owner."
-            
-    finally:
-        cursor.close()
-        conn.close()
 
 def get_user_registration(discord_id: int):
     # ... (No changes here, function remains the same) ...
