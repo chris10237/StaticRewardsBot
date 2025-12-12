@@ -267,6 +267,65 @@ def increment_user_reward(twitch_username: str, reward_column: str):
         cursor.close()
         conn.close()
 
+def decrement_user_reward(twitch_username: str, reward_column: str):
+    """
+    Decrements the count for a specific reward column for a given user, 
+    but ensures the count does not drop below zero.
+    """
+    # 1. Normalize the input name for lookup (since stored names are lowercase)
+    twitch_username = twitch_username.lower()
+    conn = get_db_connection()
+    if not conn:
+        return False, "Database connection failed."
+    
+    cursor = conn.cursor()
+    try:
+        # --- 1. VALIDATION AND LOOKUP ---
+        # 1a. Look up the discord_id first using the twitch_username
+        # This uses a case-insensitive lookup since all stored names are lowercase
+        cursor.execute("SELECT discord_id, {} FROM users WHERE twitch_username = %s;".format(reward_column), (twitch_username,))
+        result = cursor.fetchone()
+        
+        if not result:
+            return False, f"Twitch user '{twitch_username}' not found in the database."
+            
+        discord_id = result[0]
+        current_count = result[1]
+
+        # 1b. Check the reward constraint (must be greater than 0)
+        if current_count <= 0:
+            return False, f"The user **{twitch_username}** currently has **0** rewards of this type. Cannot remove."
+
+        # 1c. Ensure the column name is safe (CRITICAL SECURITY STEP)
+        valid_columns = ['free_points_reward_count', 'free_tier_list_count', 'free_watch_video_count']
+        if reward_column not in valid_columns:
+            return False, f"Invalid reward column name: {reward_column}"
+            
+        # --- 2. DECREMENT AND COMMIT ---
+        
+        # SQL to decrement the column by 1
+        update_query = f"""
+        UPDATE users 
+        SET {reward_column} = {reward_column} - 1 
+        WHERE discord_id = %s
+        RETURNING {reward_column};
+        """
+        
+        cursor.execute(update_query, (discord_id,))
+        new_count = cursor.fetchone()[0] # Get the updated count
+        conn.commit()
+        
+        return True, f"Reward decremented! New count for '{reward_column}' is **{new_count}**."
+            
+    except Exception as e:
+        conn.rollback()
+        print(f"Error decrementing reward for {twitch_username}: {e}")
+        return False, f"An unexpected database error occurred: {e}"
+            
+    finally:
+        cursor.close()
+        conn.close()
+
 # --- NEW: Discord Modal Implementation ---
 
 class TwitchRegistrationModal(discord.ui.Modal, title='Register Your Twitch'):
@@ -381,6 +440,60 @@ async def add_reward_command(
         # This handles Twitch user not found or a database error
         await interaction.followup.send(
             f"❌ **Failed to Add Reward**\n"
+            f"**Reason:** {message}",
+            ephemeral=True
+        )
+
+# --- ADMIN COMMAND: REMOVE REWARD --- 
+
+@bot.tree.command(
+    guild=discord.Object(id=GUILD_ID), 
+    name="remove-reward", 
+    description="[ADMIN ONLY] Subtracts a reward count from a registered user."
+)
+@app_commands.describe(
+    twitch_name="The registered Twitch username of the recipient.",
+    reward="The specific reward to be removed."
+)
+@app_commands.choices(reward=REWARD_CHOICES)
+async def remove_reward_command(
+    interaction: discord.Interaction, 
+    twitch_name: str, 
+    reward: app_commands.Choice[str]
+):
+    """Admin command to decrement a user's reward count."""
+    
+    # 1. ADMIN CHECK (Authorization)
+    if interaction.user.id != ADMIN_USER_ID:
+        await interaction.response.send_message(
+            "🛑 **Authorization Failed.** This command is restricted to the bot owner.", 
+            ephemeral=True
+        )
+        return
+
+    # Defer the response as we are talking to the database
+    await interaction.response.defer(ephemeral=True) 
+    
+    # Get the database column name from the choice value
+    reward_column = reward.value 
+    reward_name = reward.name
+    
+    # 2. Call the new synchronous DB function
+    success, message = decrement_user_reward(twitch_name.strip(), reward_column)
+
+    # 3. Send the response
+    if success:
+        await interaction.followup.send(
+            f"✅ **Reward Removed!**\n"
+            f"**Recipient:** `{twitch_name}`\n"
+            f"**Reward:** `{reward_name}`\n"
+            f"**Status:** {message}", # The message contains the new count
+            ephemeral=True
+        )
+    else:
+        # This handles Twitch user not found or the zero-count constraint
+        await interaction.followup.send(
+            f"❌ **Failed to Remove Reward**\n"
             f"**Reason:** {message}",
             ephemeral=True
         )
