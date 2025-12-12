@@ -132,8 +132,7 @@ def setup_db():
 
 def save_user_registration(discord_id: int, twitch_username: str):
     """
-    Saves or updates the user's registration data. It performs a case-insensitive
-    check for duplicate twitch_usernames across all users BEFORE attempting to save.
+    Saves or updates the user's registration data, ensuring the stored username is lowercase.
     """
     conn = get_db_connection()
     if not conn:
@@ -141,40 +140,36 @@ def save_user_registration(discord_id: int, twitch_username: str):
 
     cursor = conn.cursor()
     try:
-        # --- STEP 1: CHECK FOR DUPLICATE TWITCH NAME (Case-Insensitive) ---
-        # This check uses the same logic as the unique index: LOWER()
-        # It ensures no other user (whose discord_id is NOT the current user's)
-        # has this Twitch name registered.
+        # --- STEP 1: CHECK FOR DUPLICATE TWITCH NAME (Case-Insensitive Check) ---
         
-        # We search for any row where the lowercase twitch_username matches the 
-        # new lowercase input, AND the discord_id does not belong to the current user.
-        twitch_name_lower = twitch_username.lower()
-        
+        # NOTE: twitch_username passed in here is ALREADY lowercase from the modal.
+        # We search the DB for any existing twitch_username that, when lowercased, 
+        # matches the input, AND belongs to a DIFFERENT user.
         check_query = """
         SELECT discord_id 
         FROM users 
         WHERE LOWER(twitch_username) = %s AND discord_id != %s;
         """
-        cursor.execute(check_query, (twitch_name_lower, discord_id))
+        # We pass the already-lowercased twitch_username here.
+        cursor.execute(check_query, (twitch_username, discord_id))
         
-        # If a row is found, a duplicate exists.
         if cursor.fetchone() is not None:
             conn.rollback()
+            # The original raw name is no longer available here, so we display the 
+            # lowercase name that caused the conflict.
             return False, f"The Twitch name **{twitch_username}** is already registered by another user. Please choose a unique name."
             
-        # --- STEP 2: PERFORM INSERT/UPDATE (Based on discord_id) ---
+        # --- STEP 2: PERFORM INSERT/UPDATE (Save the lowercase name) ---
         
-        # Use ON CONFLICT for simplicity, as it handles a new user (INSERT) 
-        # and an existing user (UPDATE) in one query, but ONLY checks the PK.
+        # The value passed in (%s) is the lowercase version, which is what gets saved.
         query = """
-        INSERT INTO users (discord_id, twitch_name_lower)
+        INSERT INTO users (discord_id, twitch_username)
         VALUES (%s, %s)
         ON CONFLICT (discord_id) DO UPDATE SET
             twitch_username = EXCLUDED.twitch_username;
         """
-        cursor.execute(query, (discord_id, twitch_username))
+        cursor.execute(query, (discord_id, twitch_username)) # <--- twitch_username is lowercase
 
-        # Check if the user was updated (rowcount=0) or inserted (rowcount=1)
         action = "updated" if cursor.rowcount == 0 else "registered"
         
         conn.commit()
@@ -292,22 +287,27 @@ class TwitchRegistrationModal(discord.ui.Modal, title='Register Your Twitch'):
         """Called when the user submits the modal form."""
         await interaction.response.defer(ephemeral=True)
         
-        # Get the input value (keep the original casing for storage)
+        # Get the input value
         twitch_name_raw = self.twitch_username_input.value.strip()
+        
+        # *** CHANGE 1: Convert to lowercase for saving AND checking ***
+        twitch_name_for_db = twitch_name_raw.lower() 
+        
         discord_id = interaction.user.id
         
         # Save the data (handle the status returned by the DB function)
-        # *** CHANGE: Pass the original, case-sensitive name to the function. ***
-        success, message = save_user_registration(discord_id, twitch_name_raw) 
+        # Pass the lowercase version to the saving function
+        success, message = save_user_registration(discord_id, twitch_name_for_db) 
         
         # Send confirmation or error based on the result
         if success:
             await interaction.followup.send(
-                # Use the original (raw) name for display
-                f"✅ **Success!** Your Twitch username (`{twitch_name_raw}`) has been registered and linked to your Discord account.",
+                # Use the original (raw) name for display in the success message
+                f"✅ **Success!** Your Twitch username (`{twitch_name_raw}`) has been registered and linked to your Discord account. (Stored as lowercase.)",
                 ephemeral=True
             )
         else:
+            # The error message from the DB function will use the raw name
             await interaction.followup.send(
                 f"❌ **Registration Failed:** {message}",
                 ephemeral=True
