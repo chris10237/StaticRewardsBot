@@ -19,6 +19,8 @@ REWARD_CHOICES = [
 ]
 # --- END REWARD CHOICES CONSTANT ---
 
+VALID_REWARD_COLUMNS = [choice.value for choice in REWARD_CHOICES]
+
 # --- 1. Configuration & Bot Setup ---
 # Load environment variables. IMPORTANT: These MUST be set in Render's dashboard.
 token = os.getenv('DISCORD_TOKEN')
@@ -242,8 +244,8 @@ def increment_user_reward(twitch_username: str, reward_column: str):
         # 2. Increment the specified column count
         # Ensure the column name is safe and valid before formatting the SQL
         # This is a critical security step for dynamic column names.
-        valid_columns = ['free_points_reward_count', 'free_tier_list_count', 'free_watch_video_count']
-        if reward_column not in valid_columns:
+        # *** CHANGE APPLIED HERE ***
+        if reward_column not in VALID_REWARD_COLUMNS: 
             return False, f"Invalid reward column name: {reward_column}"
         
         update_query = f"""
@@ -297,12 +299,12 @@ def decrement_user_reward(twitch_username: str, reward_column: str):
             return False, f"The user **{twitch_username}** currently has **0** rewards of this type. Cannot remove."
 
         # 1c. Ensure the column name is safe (CRITICAL SECURITY STEP)
-        valid_columns = ['free_points_reward_count', 'free_tier_list_count', 'free_watch_video_count']
-        if reward_column not in valid_columns:
+        # *** CHANGE APPLIED HERE ***
+        if reward_column not in VALID_REWARD_COLUMNS: 
             return False, f"Invalid reward column name: {reward_column}"
-            
-        # --- 2. DECREMENT AND COMMIT ---
         
+        # --- 2. DECREMENT AND COMMIT ---
+    
         # SQL to decrement the column by 1
         update_query = f"""
         UPDATE users 
