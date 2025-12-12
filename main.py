@@ -142,33 +142,27 @@ def save_user_registration(discord_id: int, twitch_username: str):
     try:
         # --- STEP 1: CHECK FOR DUPLICATE TWITCH NAME (Case-Insensitive Check) ---
         
-        # NOTE: twitch_username passed in here is ALREADY lowercase from the modal.
-        # We search the DB for any existing twitch_username that, when lowercased, 
-        # matches the input, AND belongs to a DIFFERENT user.
         check_query = """
         SELECT discord_id 
         FROM users 
         WHERE LOWER(twitch_username) = %s AND discord_id != %s;
         """
-        # We pass the already-lowercased twitch_username here.
+        # Ensure parameters are passed as a tuple in the correct order:
         cursor.execute(check_query, (twitch_username, discord_id))
         
         if cursor.fetchone() is not None:
             conn.rollback()
-            # The original raw name is no longer available here, so we display the 
-            # lowercase name that caused the conflict.
             return False, f"The Twitch name **{twitch_username}** is already registered by another user. Please choose a unique name."
             
         # --- STEP 2: PERFORM INSERT/UPDATE (Save the lowercase name) ---
         
-        # The value passed in (%s) is the lowercase version, which is what gets saved.
         query = """
         INSERT INTO users (discord_id, twitch_username)
         VALUES (%s, %s)
         ON CONFLICT (discord_id) DO UPDATE SET
             twitch_username = EXCLUDED.twitch_username;
         """
-        cursor.execute(query, (discord_id, twitch_username)) # <--- twitch_username is lowercase
+        cursor.execute(query, (discord_id, twitch_username))
 
         action = "updated" if cursor.rowcount == 0 else "registered"
         
@@ -177,9 +171,13 @@ def save_user_registration(discord_id: int, twitch_username: str):
             
     except Exception as e:
         conn.rollback()
-        # Log unexpected errors (e.g., connection lost)
+        # --- CRITICAL CHANGE: PRINT THE FULL ERROR DETAILS ---
         print(f"FATAL ERROR saving registration for {discord_id}: {e}")
-        return False, f"An unexpected database error occurred during registration. Please alert the bot owner."
+        # Re-raise the exception temporarily so it prints the full traceback 
+        # for maximum clarity in your local environment.
+        raise 
+        # You can use the line below for production, but the line above is better for debugging.
+        # return False, f"An unexpected database error occurred during registration. Please alert the bot owner."
             
     finally:
         cursor.close()
