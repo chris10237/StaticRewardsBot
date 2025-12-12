@@ -218,6 +218,50 @@ def get_user_registration(discord_id: int):
         cursor.close()
         conn.close()
 
+def get_user_rewards(discord_id: int) -> dict | None:
+    """
+    Retrieves the user's reward counts from the database, returned as a dictionary.
+    Returns None if the user is not found.
+    """
+    conn = get_db_connection()
+    if not conn:
+        print("Database connection failed in get_user_rewards.")
+        return None
+
+    # Get the list of all reward column names for the SELECT query
+    reward_columns = VALID_REWARD_COLUMNS
+    
+    # We select the discord_id and all reward columns
+    select_query = f"""
+    SELECT discord_id, {', '.join(reward_columns)} 
+    FROM users
+    WHERE discord_id = %s;
+    """
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute(select_query, (discord_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            return None # User not found
+            
+        # The column names are available via cursor.description
+        column_names = [desc[0] for desc in cursor.description]
+        
+        # Create a dictionary mapping column names to their values
+        user_data = dict(zip(column_names, result))
+        
+        return user_data
+            
+    except Exception as e:
+        print(f"Error retrieving user rewards for {discord_id}: {e}")
+        return None
+            
+    finally:
+        cursor.close()
+        conn.close()
+
 def increment_user_reward(twitch_username: str, reward_column: str):
     # ... (No changes here, function remains the same) ...
     """Increments the count for a specific reward column for a given user."""
@@ -390,6 +434,62 @@ async def on_ready():
     except Exception as e:
         print(f"failed to sync commands: {e}")
     print("---------------------------------------------")
+
+@bot.tree.command(
+    guild=discord.Object(id=GUILD_ID), 
+    name="my-rewards", 
+    description="View your current inventory of rewards."
+)
+async def my_rewards_command(interaction: discord.Interaction):
+    """Retrieves and displays the user's current reward inventory."""
+    
+    await interaction.response.defer(ephemeral=True) 
+    
+    discord_id = interaction.user.id
+    user_rewards = get_user_rewards(discord_id)
+    
+    # 1) Tell them they're not in the database
+    if user_rewards is None:
+        await interaction.followup.send(
+            "🛑 **Not Registered.** You don't appear to be registered yet. Please use `/register` to link your Twitch account and start collecting rewards!",
+            ephemeral=True
+        )
+        return
+        
+    # Prepare the list of rewards with a quantity > 0
+    reward_list = []
+    
+    # Use the REWARD_CHOICES constant to get the user-friendly name
+    for choice in REWARD_CHOICES:
+        column_name = choice.value
+        display_name = choice.name
+        
+        # The count will be 0 or more (since we set DEFAULT 0 in setup_db)
+        count = user_rewards.get(column_name, 0)
+        
+        if count > 0:
+            reward_list.append(f"• **{display_name}:** {count}")
+            
+    # 2) Print out a list of rewards
+    if reward_list:
+        rewards_text = "\n".join(reward_list)
+        
+        embed = discord.Embed(
+            title=f"🎁 {interaction.user.name}'s Reward Inventory",
+            description=f"Here are the rewards currently linked to your account:",
+            color=discord.Color.gold()
+        )
+        embed.add_field(name="Available Rewards", value=rewards_text, inline=False)
+        embed.set_footer(text="Rewards must be claimed with a staff member.")
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        
+    # 3) Tell them their rewards inventory is empty
+    else:
+        await interaction.followup.send(
+            "📦 **Inventory Empty!** You are registered, but currently have no available rewards to claim.",
+            ephemeral=True
+        )
 
 # --- ADMIN COMMAND --- 
 
