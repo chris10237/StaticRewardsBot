@@ -52,7 +52,7 @@ def get_db_connection():
 
 def setup_db():
     """
-    Creates the 'users' table if it doesn't already exist and ensures columns and a 
+    Creates the 'users' table if it doesn't already exist and ensures a
     case-insensitive unique index on twitch_username.
     """
     conn = get_db_connection()
@@ -71,6 +71,8 @@ def setup_db():
         cursor.execute(create_table_query)
 
         # 2. Add a CASE-INSENSITIVE UNIQUE INDEX.
+        # This index will cause any INSERT/UPDATE that results in a duplicate 
+        # (case-insensitive) twitch_username to throw a UniqueViolation error.
         try:
             cursor.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS 
@@ -87,9 +89,9 @@ def setup_db():
                 # If any other ProgrammingError (like lacking permissions) occurs, we re-raise.
                 raise pe 
         
-        # --- CRITICAL HANDLING FOR UNIQUE CONSTRAINT VIOLATION ---
         except psycopg2.errors.UniqueViolation as uv:
-            # This is raised if the index can't be created because of duplicate data.
+            # This is raised IF the index can't be created because of duplicate data 
+            # (e.g., 'name' and 'Name' already exist).
             conn.rollback()
             print("----------------------------------------------------------------------------------")
             print("!!! FATAL DB SETUP ERROR: UNIQUE CONSTRAINT VIOLATION !!!")
@@ -97,12 +99,12 @@ def setup_db():
             print("You must manually clean the database using the SQL query below, and then restart the bot.")
             print("SQL to find duplicates: SELECT LOWER(twitch_username), COUNT(*) FROM users GROUP BY 1 HAVING COUNT(*) > 1;")
             print("----------------------------------------------------------------------------------")
-            # We exit the function here. The commit is skipped.
             return
             
-        # 3. Add Reward Columns (Keep your existing, working logic)
-        # (Rollback is fine here since column addition is non-critical)
-        
+        # 3. Add Reward Columns (Your existing logic)
+        # ... (Your logic for adding reward columns remains here) ...
+
+        # --- REWARD COLUMN LOGIC REMAINS HERE ---
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN free_points_reward_count INT DEFAULT 0;")
         except psycopg2.errors.DuplicateColumn:
@@ -117,6 +119,7 @@ def setup_db():
             cursor.execute("ALTER TABLE users ADD COLUMN free_watch_video_count INT DEFAULT 0;")
         except psycopg2.errors.DuplicateColumn:
             conn.rollback()
+        # --- END REWARD COLUMN LOGIC ---
             
         conn.commit()
         print("Database table 'users' setup and commit complete.")
@@ -138,42 +141,36 @@ def save_user_registration(discord_id: int, twitch_username: str):
 
     cursor = conn.cursor()
     try:
-        # 1. Check if the user is already registered (if discord_id exists)
-        cursor.execute("SELECT discord_id FROM users WHERE discord_id = %s;", (discord_id,))
-        user_exists = cursor.fetchone() is not None
+        # Use ON CONFLICT to handle both new registration (INSERT) and existing user (UPDATE).
+        # discord_id is the PRIMARY KEY. If it conflicts (user exists), we UPDATE the username.
+        # If the UPDATE/INSERT fails due to a UNIQUE INDEX violation on LOWER(twitch_username), 
+        # it will be caught by the except block below.
 
-        if user_exists:
-            # 2. If user exists, perform a simple UPDATE.
-            # This UPDATE will FAIL if the new twitch_username conflicts with another row.
-            query = """
-            UPDATE users
-            SET twitch_username = %s
-            WHERE discord_id = %s;
-            """
-            cursor.execute(query, (twitch_username, discord_id))
-            action = "updated"
-        else:
-            # 3. If user is new, perform a simple INSERT.
-            # This INSERT will FAIL if the twitch_username conflicts with an existing row.
-            query = """
-            INSERT INTO users (discord_id, twitch_username)
-            VALUES (%s, %s);
-            """
-            cursor.execute(query, (discord_id, twitch_username))
-            action = "registered"
-            
+        query = """
+        INSERT INTO users (discord_id, twitch_username)
+        VALUES (%s, %s)
+        ON CONFLICT (discord_id) DO UPDATE SET
+            twitch_username = EXCLUDED.twitch_username;
+        """
+        cursor.execute(query, (discord_id, twitch_username))
+
+        # Check if the user was updated or inserted
+        action = "updated" if cursor.rowcount == 0 else "registered"
+        
         conn.commit()
         return True, f"Registration successful (name {action})."
             
     except psycopg2.errors.UniqueViolation:
         conn.rollback()
-        # This is the expected and correct error if the twitch_username is already taken.
+        # This is the expected and correct error if the twitch_username is already taken 
+        # by another discord_id due to the case-insensitive index on LOWER(twitch_username).
         return False, f"The Twitch name **{twitch_username}** is already registered by another user. Please choose a unique name."
 
     except Exception as e:
         conn.rollback()
+        # Log unexpected errors
         print(f"FATAL ERROR saving registration for {discord_id}: {e}")
-        return False, f"An unexpected database error occurred during registration. Please alert the bot owner. Error details: {e}"
+        return False, f"An unexpected database error occurred during registration. Please alert the bot owner."
             
     finally:
         cursor.close()
@@ -281,13 +278,13 @@ class TwitchRegistrationModal(discord.ui.Modal, title='Register Your Twitch'):
         """Called when the user submits the modal form."""
         await interaction.response.defer(ephemeral=True)
         
-        # Get the input value and convert it to lowercase for storage
+        # Get the input value (keep the original casing for storage)
         twitch_name_raw = self.twitch_username_input.value.strip()
-        twitch_name = twitch_name_raw.lower() # Convert to lowercase for DB storage
         discord_id = interaction.user.id
         
         # Save the data (handle the status returned by the DB function)
-        success, message = save_user_registration(discord_id, twitch_name) # Use lowercase name
+        # *** CHANGE: Pass the original, case-sensitive name to the function. ***
+        success, message = save_user_registration(discord_id, twitch_name_raw) 
         
         # Send confirmation or error based on the result
         if success:
