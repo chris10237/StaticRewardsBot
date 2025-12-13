@@ -533,6 +533,67 @@ async def my_rewards_command(interaction: discord.Interaction):
             ephemeral=True
         )
 
+@bot.tree.command(
+    guild=discord.Object(id=GUILD_ID), 
+    name="display-rewards", 
+    description="View another user's current inventory of rewards (publicly)."
+)
+@app_commands.describe(
+    member="The Discord user whose rewards list you want to view."
+)
+async def display_rewards_command(interaction: discord.Interaction, member: discord.Member):
+    """Retrieves and publicly displays another user's current reward inventory."""
+    
+    # 1. Defer the response. Note: We use ephemeral=False (the default) so the response is public.
+    await interaction.response.defer(ephemeral=False) 
+    
+    discord_id = member.id
+    user_rewards = get_user_rewards(discord_id)
+    
+    # 2. Handle User Not Registered
+    if user_rewards is None:
+        await interaction.followup.send(
+            f"🛑 **Not Registered.** **{member.display_name}** does not appear to be registered yet. They need to use `/register` to link their Twitch account.",
+            ephemeral=False # Public message
+        )
+        return
+        
+    # 3. Prepare the list of rewards with a quantity > 0
+    reward_list = []
+    
+    # Use the REWARD_CHOICES constant to get the user-friendly name
+    for choice in REWARD_CHOICES:
+        column_name = choice.value
+        display_name = choice.name
+        
+        # The count will be 0 or more
+        count = user_rewards.get(column_name, 0)
+        
+        if count > 0:
+            # Note: We display the user-friendly name from the REWARD_CHOICES
+            reward_list.append(f"• **{display_name}:** {count}")
+            
+    # 4. Print out a list of rewards (if any)
+    if reward_list:
+        rewards_text = "\n".join(reward_list)
+        
+        embed = discord.Embed(
+            title=f"🎁 {member.display_name}'s Public Reward Inventory",
+            description=f"Here are the rewards currently linked to **{member.display_name}'s** account:",
+            color=discord.Color.blue() # Changed color just for visual distinction
+        )
+        embed.add_field(name="Available Rewards", value=rewards_text, inline=False)
+        embed.set_footer(text=f"Requested by {interaction.user.display_name}")
+
+        await interaction.followup.send(embed=embed, ephemeral=False) # Public response
+        
+    # 5. Tell them their rewards inventory is empty
+    else:
+        await interaction.followup.send(
+            f"📦 **Inventory Empty!** **{member.display_name}** is registered, but currently has no available rewards to claim.",
+            ephemeral=False # Public message
+        )
+
 # --- ADMIN COMMANDS --- 
 
 @bot.tree.command(
