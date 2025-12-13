@@ -496,7 +496,8 @@ async def my_rewards_command(interaction: discord.Interaction):
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID), 
     name="add-reward", 
-    description="[ADMIN ONLY] Adds a reward count to a registered user."
+    description="[ADMIN ONLY] Adds a reward count to a registered user.",
+    default_member_permissions=discord.Permissions(administrator=True)
 )
 @app_commands.describe(
     twitch_name="The registered Twitch username of the recipient.",
@@ -551,7 +552,8 @@ async def add_reward_command(
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID), 
     name="remove-reward", 
-    description="[ADMIN ONLY] Subtracts a reward count from a registered user."
+    description="[ADMIN ONLY] Subtracts a reward count from a registered user.",
+    default_member_permissions=discord.Permissions(administrator=True)
 )
 @app_commands.describe(
     twitch_name="The registered Twitch username of the recipient.",
