@@ -522,7 +522,7 @@ async def my_rewards_command(interaction: discord.Interaction):
             color=discord.Color.gold()
         )
         embed.add_field(name="Available Rewards", value=rewards_text, inline=False)
-        embed.set_footer(text="Rewards must be claimed with a staff member.")
+        embed.set_footer(text="Let Static know when you want to use them!")
 
         await interaction.followup.send(embed=embed, ephemeral=True)
         
