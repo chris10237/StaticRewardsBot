@@ -723,25 +723,7 @@ async def remove_reward_discord_command(
             f"**Reason:** {message}",
             ephemeral=True
         )
-
-@bot.tree.command(
-    guild=discord.Object(id=GUILD_ID), 
-    name="add-reward", 
-    description="[ADMIN ONLY] Adds a reward count to a registered user."
-)
-@app_commands.default_permissions(administrator=True)
-@app_commands.describe(
-    twitch_name="The registered Twitch username of the recipient.",
-    reward="The specific reward to be added."
-)
-@app_commands.choices(reward=REWARD_CHOICES)
-async def add_reward_command(
-    interaction: discord.Interaction, 
-    twitch_name: str, 
-    reward: app_commands.Choice[str]
-):
-    """Admin command to increment a user's reward count."""
-    
+ 
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID), 
     name="add-reward-twitch", 
