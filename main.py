@@ -8,9 +8,6 @@ import psycopg2
 
 from discord import app_commands
 
-# ... (all your existing imports)
-
-# --- REWARD CHOICES CONSTANT ---
 REWARD_CHOICES = [
     discord.app_commands.Choice(name="Free Points Reward", value="free_points_reward_count"),
     discord.app_commands.Choice(name="Tier List", value="tier_list_count"),
@@ -27,11 +24,9 @@ REWARD_CHOICES = [
     discord.app_commands.Choice(name="Cast your RL Game", value="cast_count"),
     # Add more rewards here following the 'name': 'database_column_name' structure
 ]
-# --- END REWARD CHOICES CONSTANT ---
 
 VALID_REWARD_COLUMNS = [choice.value for choice in REWARD_CHOICES]
 
-# --- 1. Configuration & Bot Setup ---
 # Load environment variables. IMPORTANT: These MUST be set in Render's dashboard.
 token = os.getenv('DISCORD_TOKEN')
 DATABASE_URL = os.getenv('DATABASE_URL')
@@ -47,7 +42,7 @@ intents.members = True
 
 bot = commands.Bot(command_prefix=None, intents = intents)
 
-# --- NEW: PostgreSQL Helper Functions ---
+# --- PostgreSQL Helper Functions ---
 
 def get_db_connection():
     """Establishes and returns a connection to the PostgreSQL database."""
@@ -98,7 +93,7 @@ def setup_db():
             if 'already exists' in str(pe):
                 print("Case-insensitive unique index already exists.")
             else:
-                # If any other ProgrammingError (like lacking ) occurs, we re-raise.
+                # If any other ProgrammingError (like lacking) occurs, we re-raise.
                 raise pe 
         
         except psycopg2.errors.UniqueViolation as uv:
@@ -112,11 +107,8 @@ def setup_db():
             print("SQL to find duplicates: SELECT LOWER(twitch_username), COUNT(*) FROM users GROUP BY 1 HAVING COUNT(*) > 1;")
             print("----------------------------------------------------------------------------------")
             return
-            
-        # 3. Add Reward Columns (Your existing logic)
-        # ... (Your logic for adding reward columns remains here) ...
 
-        # --- REWARD COLUMN LOGIC REMAINS HERE ---
+        # --- REWARD COLUMN LOGIC (add more rewards here after adding them above)---
         try:
             cursor.execute("ALTER TABLE users ADD COLUMN free_points_reward_count INT DEFAULT 0;")
         except psycopg2.errors.DuplicateColumn:
@@ -202,8 +194,7 @@ def save_user_registration(discord_id: int, twitch_username: str):
 
     cursor = conn.cursor()
     try:
-        # --- STEP 1: CHECK FOR DUPLICATE TWITCH NAME (Case-Insensitive Check) ---
-        
+        # CHECK FOR DUPLICATE TWITCH NAME (Case-Insensitive Check) ---
         check_query = """
         SELECT discord_id 
         FROM users 
@@ -233,20 +224,14 @@ def save_user_registration(discord_id: int, twitch_username: str):
             
     except Exception as e:
         conn.rollback()
-        # --- CRITICAL CHANGE: PRINT THE FULL ERROR DETAILS ---
         print(f"FATAL ERROR saving registration for {discord_id}: {e}")
-        # Re-raise the exception temporarily so it prints the full traceback 
-        # for maximum clarity in your local environment.
         raise 
-        # You can use the line below for production, but the line above is better for debugging.
-        # return False, f"An unexpected database error occurred during registration. Please alert the bot owner."
             
     finally:
         cursor.close()
         conn.close()
 
 def get_user_registration(discord_id: int):
-    # ... (No changes here, function remains the same) ...
     """Retrieves the user's registration data from the database."""
     conn = get_db_connection()
     if not conn:
@@ -323,7 +308,6 @@ def get_user_rewards(discord_id: int) -> dict | None:
         conn.close()
 
 def increment_user_reward(twitch_username: str, reward_column: str):
-    # ... (No changes here, function remains the same) ...
     """Increments the count for a specific reward column for a given user."""
     twitch_username = twitch_username.lower()
     conn = get_db_connection()
@@ -348,7 +332,7 @@ def increment_user_reward(twitch_username: str, reward_column: str):
         # 2. Increment the specified column count
         # Ensure the column name is safe and valid before formatting the SQL
         # This is a critical security step for dynamic column names.
-        # *** CHANGE APPLIED HERE ***
+
         if reward_column not in VALID_REWARD_COLUMNS: 
             return False, f"Invalid reward column name: {reward_column}"
         
@@ -403,7 +387,6 @@ def decrement_user_reward(twitch_username: str, reward_column: str):
             return False, f"The user **{twitch_username}** currently has **0** rewards of this type. Cannot remove."
 
         # 1c. Ensure the column name is safe (CRITICAL SECURITY STEP)
-        # *** CHANGE APPLIED HERE ***
         if reward_column not in VALID_REWARD_COLUMNS: 
             return False, f"Invalid reward column name: {reward_column}"
         
@@ -432,7 +415,7 @@ def decrement_user_reward(twitch_username: str, reward_column: str):
         cursor.close()
         conn.close()
 
-# --- NEW: Discord Modal Implementation ---
+# --- Discord Modal Implementation ---
 
 class TwitchRegistrationModal(discord.ui.Modal, title='Register Your Twitch'):
     """A Discord Modal for collecting the user's Twitch username."""
@@ -445,7 +428,6 @@ class TwitchRegistrationModal(discord.ui.Modal, title='Register Your Twitch'):
         style=discord.TextStyle.short
     )
     
-    # *** FIX APPLIED: This method is now correctly indented inside the class ***
     async def on_submit(self, interaction: discord.Interaction):
         """Called when the user submits the modal form."""
         await interaction.response.defer(ephemeral=True)
@@ -453,7 +435,7 @@ class TwitchRegistrationModal(discord.ui.Modal, title='Register Your Twitch'):
         # Get the input value
         twitch_name_raw = self.twitch_username_input.value.strip()
         
-        # *** CHANGE 1: Convert to lowercase for saving AND checking ***
+        # Convert to lowercase for saving AND checking ***
         twitch_name_for_db = twitch_name_raw.lower() 
         
         discord_id = interaction.user.id
@@ -476,7 +458,7 @@ class TwitchRegistrationModal(discord.ui.Modal, title='Register Your Twitch'):
                 ephemeral=True
             )
 
-# --- 2. Discord Bot Events and Commands ---
+# --- Discord Bot Events and Commands ---
 
 @bot.event
 async def on_ready():
@@ -551,7 +533,7 @@ async def my_rewards_command(interaction: discord.Interaction):
             ephemeral=True
         )
 
-# --- ADMIN COMMAND --- 
+# --- ADMIN COMMANDS --- 
 
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID), 
@@ -569,7 +551,6 @@ async def add_reward_command(
     twitch_name: str, 
     reward: app_commands.Choice[str]
 ):
-    # ... (Command logic remains the same) ...
     """Admin command to increment a user's reward count."""
     
     # 1. ADMIN CHECK (Authorization)
@@ -677,7 +658,6 @@ async def register_command(interaction: discord.Interaction):
     description="Shows the Twitch username you have registered with the bot."
 )
 async def get_registration_command(interaction: discord.Interaction):
-    # ... (Command logic remains the same) ...
     """Retrieves and displays the user's registered Twitch username."""
     # Defer the response, but keep it ephemeral (only the user sees the output)
     await interaction.response.defer(ephemeral=True) 
@@ -700,8 +680,6 @@ async def get_registration_command(interaction: discord.Interaction):
             ephemeral=True
         )
 
-# --- Existing Commands (No changes needed) ---
-
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID),
     name="help",
@@ -716,7 +694,7 @@ async def hello_command(interaction: discord.Interaction):
     await asyncio.sleep(0.5)
 
     # Use followup.send() after deferring
-    await interaction.followup.send(f"Hello, {interaction.user.name}! This bot keeps track of your rewards in Static's stream. If Static hasn't manually entered you into the database yet, you can use /register and enter your Twitch name. After that it's extremely straightforward - simply use /my-rewards to view rewards you have in the stream!", ephemeral=False)
+    await interaction.followup.send(f"Hello, {interaction.user.name}! This bot keeps track of your channel point rewards in Static's stream. If Static hasn't manually entered you into the database yet, you can use /register and enter your Twitch name. It doesn't have to be exact, it's just for Static to type in when he's adding/removing rewards to your account. After that it's extremely straightforward - simply use /my-rewards to view rewards you have in the stream!", ephemeral=False)
 
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID),
@@ -729,10 +707,10 @@ async def goodbye_command(interaction: discord.Interaction):
     await asyncio.sleep(0.5)
     await interaction.followup.send(f"fuk u {interaction.user.name}! (Goodbye message)", ephemeral=False)
 
-# --- 3. Flask Web Server Setup (No changes needed) ---
+# --- 3. Flask Web Server Setup ---
 app = Flask(__name__) # The Flask application instance is named 'app'
 
-# --- 4. Discord Bot Runner Function (No changes needed) ---
+# --- 4. Discord Bot Runner Function ---
 def start_bot():
     """Starts the Discord bot client in a dedicated thread."""
     print("Starting Discord Bot in a new thread...")
@@ -743,7 +721,7 @@ def start_bot():
     except Exception as e:
         print(f"FATAL STARTUP ERROR: {e}")
 
-# --- 5. Flask Bot Integration (No changes needed) ---
+# --- 5. Flask Bot Integration ---
 @app.before_request
 def run_bot_on_start():
     """Launches the bot thread right before the web server begins serving."""
