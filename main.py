@@ -7,7 +7,8 @@ import threading
 import psycopg2 
 import urllib.parse 
 
-from discord import app_commands 
+from discord import app_commands
+from discord.app_commands import default_permissions, permissions # Add default_permissions
 # ... (all your existing imports)
 
 # --- REWARD CHOICES CONSTANT ---
