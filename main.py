@@ -596,6 +596,134 @@ async def display_rewards_command(interaction: discord.Interaction, member: disc
 
 # --- ADMIN COMMANDS --- 
 
+# --- ADMIN COMMAND: ADD REWARD (DISCORD MEMBER) ---
+
+@bot.tree.command(
+    guild=discord.Object(id=GUILD_ID), 
+    name="add-reward", 
+    description="[ADMIN ONLY] Adds a reward count to a registered user (by Discord selection)."
+)
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(
+    member="The Discord user (must be registered) of the recipient.",
+    reward="The specific reward to be added."
+)
+@app_commands.choices(reward=REWARD_CHOICES)
+async def add_reward_discord_command(
+    interaction: discord.Interaction, 
+    member: discord.Member, 
+    reward: app_commands.Choice[str]
+):
+    """Admin command to increment a user's reward count by Discord selection."""
+    
+    # 1. ADMIN CHECK (Authorization)
+    if interaction.user.id != ADMIN_USER_ID:
+        await interaction.response.send_message(
+            "🛑 **Authorization Failed.** This command is restricted to the bot owner.", 
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True) 
+    
+    # 2. Get the recipient's Twitch username using their Discord ID
+    twitch_name = get_user_registration(member.id)
+    
+    if twitch_name is None:
+        await interaction.followup.send(
+            f"❌ **Failed to Add Reward** (Via Discord Selection)\n"
+            f"**Reason:** The user **{member.display_name}** is not registered. They must use `/register` first.",
+            ephemeral=True
+        )
+        return
+        
+    # Get the database column name from the choice value
+    reward_column = reward.value 
+    reward_name = reward.name
+    
+    # 3. Call the synchronous DB function (Uses the fetched twitch_name)
+    success, message = increment_user_reward(twitch_name, reward_column)
+
+    # 4. Send the response
+    if success:
+        await interaction.followup.send(
+            f"✅ **Reward Added!** (Via Discord Selection)\n"
+            f"**Recipient:** `{member.display_name}` (Twitch: `{twitch_name}`)\n"
+            f"**Reward:** `{reward_name}`\n"
+            f"**Status:** {message}", # The message contains the new count
+            ephemeral=True
+        )
+    else:
+        await interaction.followup.send(
+            f"❌ **Failed to Add Reward** (Via Discord Selection)\n"
+            f"**Reason:** {message}",
+            ephemeral=True
+        )
+
+# --- ADMIN COMMAND: REMOVE REWARD (DISCORD MEMBER) ---
+
+@bot.tree.command(
+    guild=discord.Object(id=GUILD_ID), 
+    name="remove-reward", 
+    description="[ADMIN ONLY] Subtracts a reward count from a registered user (by Discord selection)."
+)
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(
+    member="The Discord user (must be registered) of the recipient.",
+    reward="The specific reward to be removed."
+)
+@app_commands.choices(reward=REWARD_CHOICES)
+async def remove_reward_discord_command(
+    interaction: discord.Interaction, 
+    member: discord.Member, 
+    reward: app_commands.Choice[str]
+):
+    """Admin command to decrement a user's reward count by Discord selection."""
+    
+    # 1. ADMIN CHECK (Authorization)
+    if interaction.user.id != ADMIN_USER_ID:
+        await interaction.response.send_message(
+            "🛑 **Authorization Failed.** This command is restricted to the bot owner.", 
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True) 
+    
+    # 2. Get the recipient's Twitch username using their Discord ID
+    twitch_name = get_user_registration(member.id)
+    
+    if twitch_name is None:
+        await interaction.followup.send(
+            f"❌ **Failed to Remove Reward** (Via Discord Selection)\n"
+            f"**Reason:** The user **{member.display_name}** is not registered. They must use `/register` first.",
+            ephemeral=True
+        )
+        return
+        
+    # Get the database column name from the choice value
+    reward_column = reward.value 
+    reward_name = reward.name
+    
+    # 3. Call the synchronous DB function (Uses the fetched twitch_name)
+    success, message = decrement_user_reward(twitch_name, reward_column)
+
+    # 4. Send the response
+    if success:
+        await interaction.followup.send(
+            f"✅ **Reward Removed!** (Via Discord Selection)\n"
+            f"**Recipient:** `{member.display_name}` (Twitch: `{twitch_name}`)\n"
+            f"**Reward:** `{reward_name}`\n"
+            f"**Status:** {message}",
+            ephemeral=True
+        )
+    else:
+        await interaction.followup.send(
+            f"❌ **Failed to Remove Reward** (Via Discord Selection)\n"
+            f"**Reason:** {message}",
+            ephemeral=True
+        )
+
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID), 
     name="add-reward", 
@@ -614,6 +742,24 @@ async def add_reward_command(
 ):
     """Admin command to increment a user's reward count."""
     
+@bot.tree.command(
+    guild=discord.Object(id=GUILD_ID), 
+    name="add-reward-twitch", 
+    description="[ADMIN ONLY] Adds a reward count using a Twitch username."
+)
+@app_commands.default_permissions(administrator=True)
+@app_commands.describe(
+    twitch_name="The registered Twitch username of the recipient.",
+    reward="The specific reward to be added."
+)
+@app_commands.choices(reward=REWARD_CHOICES)
+async def add_reward_twitch_command(
+    interaction: discord.Interaction, 
+    twitch_name: str, 
+    reward: app_commands.Choice[str]
+):
+    """Admin command to increment a user's reward count by Twitch name."""
+    
     # 1. ADMIN CHECK (Authorization)
     if interaction.user.id != ADMIN_USER_ID:
         await interaction.response.send_message(
@@ -629,13 +775,13 @@ async def add_reward_command(
     reward_column = reward.value 
     reward_name = reward.name
     
-    # 2. Call the new synchronous DB function
+    # 2. Call the synchronous DB function (Uses the input twitch_name)
     success, message = increment_user_reward(twitch_name.strip(), reward_column)
 
     # 3. Send the response
     if success:
         await interaction.followup.send(
-            f"✅ **Reward Added!**\n"
+            f"✅ **Reward Added!** (Via Twitch Name)\n"
             f"**Recipient:** `{twitch_name}`\n"
             f"**Reward:** `{reward_name}`\n"
             f"**Status:** {message}", # The message contains the new count
@@ -644,7 +790,7 @@ async def add_reward_command(
     else:
         # This handles Twitch user not found or a database error
         await interaction.followup.send(
-            f"❌ **Failed to Add Reward**\n"
+            f"❌ **Failed to Add Reward** (Via Twitch Name)\n"
             f"**Reason:** {message}",
             ephemeral=True
         )
@@ -653,8 +799,8 @@ async def add_reward_command(
 
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID), 
-    name="remove-reward", 
-    description="[ADMIN ONLY] Subtracts a reward count from a registered user."
+    name="remove-reward-twitch", 
+    description="[ADMIN ONLY] Subtracts a reward count using a Twitch username."
 )
 @app_commands.default_permissions(administrator=True)
 @app_commands.describe(
@@ -662,12 +808,12 @@ async def add_reward_command(
     reward="The specific reward to be removed."
 )
 @app_commands.choices(reward=REWARD_CHOICES)
-async def remove_reward_command(
+async def remove_reward_twitch_command(
     interaction: discord.Interaction, 
     twitch_name: str, 
     reward: app_commands.Choice[str]
 ):
-    """Admin command to decrement a user's reward count."""
+    """Admin command to decrement a user's reward count by Twitch name."""
     
     # 1. ADMIN CHECK (Authorization)
     if interaction.user.id != ADMIN_USER_ID:
@@ -684,13 +830,13 @@ async def remove_reward_command(
     reward_column = reward.value 
     reward_name = reward.name
     
-    # 2. Call the new synchronous DB function
+    # 2. Call the synchronous DB function (Uses the input twitch_name)
     success, message = decrement_user_reward(twitch_name.strip(), reward_column)
 
     # 3. Send the response
     if success:
         await interaction.followup.send(
-            f"✅ **Reward Removed!**\n"
+            f"✅ **Reward Removed!** (Via Twitch Name)\n"
             f"**Recipient:** `{twitch_name}`\n"
             f"**Reward:** `{reward_name}`\n"
             f"**Status:** {message}", # The message contains the new count
@@ -699,7 +845,7 @@ async def remove_reward_command(
     else:
         # This handles Twitch user not found or the zero-count constraint
         await interaction.followup.send(
-            f"❌ **Failed to Remove Reward**\n"
+            f"❌ **Failed to Remove Reward** (Via Twitch Name)\n"
             f"**Reason:** {message}",
             ephemeral=True
         )
