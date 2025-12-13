@@ -89,7 +89,7 @@ def setup_db():
             if 'already exists' in str(pe):
                 print("Case-insensitive unique index already exists.")
             else:
-                # If any other ProgrammingError (like lacking permissions) occurs, we re-raise.
+                # If any other ProgrammingError (like lacking ) occurs, we re-raise.
                 raise pe 
         
         except psycopg2.errors.UniqueViolation as uv:
@@ -497,9 +497,9 @@ async def my_rewards_command(interaction: discord.Interaction):
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID), 
     name="add-reward", 
-    description="[ADMIN ONLY] Adds a reward count to a registered user.",
-    default_member_permissions=discord.Permissions(administrator=True)
+    description="[ADMIN ONLY] Adds a reward count to a registered user."
 )
+@app_commands.default_permissions(administrator=True)
 @app_commands.describe(
     twitch_name="The registered Twitch username of the recipient.",
     reward="The specific reward to be added."
@@ -553,9 +553,9 @@ async def add_reward_command(
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID), 
     name="remove-reward", 
-    description="[ADMIN ONLY] Subtracts a reward count from a registered user.",
-    default_member_permissions=discord.Permissions(administrator=True)
+    description="[ADMIN ONLY] Subtracts a reward count from a registered user."
 )
+@app_commands.default_permissions(administrator=True)
 @app_commands.describe(
     twitch_name="The registered Twitch username of the recipient.",
     reward="The specific reward to be removed."
