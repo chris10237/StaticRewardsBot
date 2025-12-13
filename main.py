@@ -13,8 +13,18 @@ from discord import app_commands
 # --- REWARD CHOICES CONSTANT ---
 REWARD_CHOICES = [
     discord.app_commands.Choice(name="Free Points Reward", value="free_points_reward_count"),
-    discord.app_commands.Choice(name="Free Tier List Slot", value="free_tier_list_count"),
-    discord.app_commands.Choice(name="Free Watch Video", value="free_watch_video_count"),
+    discord.app_commands.Choice(name="Tier List", value="tier_list_count"),
+    discord.app_commands.Choice(name="Watch Video", value="watch_video_count"),
+    discord.app_commands.Choice(name="Replay Analysis", value="replay_analysis_count"),
+    discord.app_commands.Choice(name="Listen to Album", value="album_count"),
+    discord.app_commands.Choice(name="DJ Rest of Stream", value="dj_count"),
+    discord.app_commands.Choice(name="Song Request Rest of Stream", value="song_request_count"),
+    discord.app_commands.Choice(name="Shuffle Artist of your Choice", value="shuffle_count"),
+    discord.app_commands.Choice(name="Play Marbles on Stream", value="marbles_count"),
+    discord.app_commands.Choice(name="Play 5 Games of 1v1", value="1v1_count"),
+    discord.app_commands.Choice(name="Play Jackbox", value="jackbox_count"),
+    discord.app_commands.Choice(name="Play 5 games of KBM", value="kbm_count"),
+    discord.app_commands.Choice(name="Cast your RL Game", value="cast_count"),
     # Add more rewards here following the 'name': 'database_column_name' structure
 ]
 # --- END REWARD CHOICES CONSTANT ---
@@ -113,12 +123,62 @@ def setup_db():
             conn.rollback()
             
         try:
-            cursor.execute("ALTER TABLE users ADD COLUMN free_tier_list_count INT DEFAULT 0;")
+            cursor.execute("ALTER TABLE users ADD COLUMN tier_list_count INT DEFAULT 0;")
         except psycopg2.errors.DuplicateColumn:
             conn.rollback()
 
         try:
-            cursor.execute("ALTER TABLE users ADD COLUMN free_watch_video_count INT DEFAULT 0;")
+            cursor.execute("ALTER TABLE users ADD COLUMN watch_video_count INT DEFAULT 0;")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN replay_analysis_count INT DEFAULT 0;")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN album_count INT DEFAULT 0;")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN dj_count INT DEFAULT 0;")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN song_request_count INT DEFAULT 0;")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN shuffle_count INT DEFAULT 0;")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN marbles_count INT DEFAULT 0;")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN 1v1_count INT DEFAULT 0;")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN jackbox_count INT DEFAULT 0;")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN kbm_count INT DEFAULT 0;")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN cast_count INT DEFAULT 0;")
         except psycopg2.errors.DuplicateColumn:
             conn.rollback()
         # --- END REWARD COLUMN LOGIC ---
