@@ -704,8 +704,8 @@ async def get_registration_command(interaction: discord.Interaction):
 
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID),
-    name="hello",
-    description="Says hello back to the user!"
+    name="help",
+    description="Instructions on how to use the bot"
 )
 async def hello_command(interaction: discord.Interaction):
     """Says hello back to the user."""
@@ -716,7 +716,7 @@ async def hello_command(interaction: discord.Interaction):
     await asyncio.sleep(0.5)
 
     # Use followup.send() after deferring
-    await interaction.followup.send(f"Hello, {interaction.user.name}! (Successful response!)", ephemeral=False)
+    await interaction.followup.send(f"Hello, {interaction.user.name}! This bot keeps track of your rewards in Static's stream. If Static hasn't manually entered you into the database yet, you can use /register and enter your Twitch name. After that it's extremely straightforward - simply use /my-rewards to view rewards you have in the stream!", ephemeral=False)
 
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID),
