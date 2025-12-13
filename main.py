@@ -5,7 +5,6 @@ import asyncio
 from flask import Flask
 import threading
 import psycopg2 
-import urllib.parse 
 
 from discord import app_commands
 
