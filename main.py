@@ -21,7 +21,7 @@ REWARD_CHOICES = [
     discord.app_commands.Choice(name="Song Request Rest of Stream", value="song_request_count"),
     discord.app_commands.Choice(name="Shuffle Artist of your Choice", value="shuffle_count"),
     discord.app_commands.Choice(name="Play Marbles on Stream", value="marbles_count"),
-    discord.app_commands.Choice(name="Play 5 Games of 1v1", value="1v1_count"),
+    discord.app_commands.Choice(name="Play 5 Games of 1v1", value="ones_count"),
     discord.app_commands.Choice(name="Play Jackbox", value="jackbox_count"),
     discord.app_commands.Choice(name="Play 5 games of KBM", value="kbm_count"),
     discord.app_commands.Choice(name="Cast your RL Game", value="cast_count"),
@@ -163,7 +163,7 @@ def setup_db():
             conn.rollback()
 
         try:
-            cursor.execute("ALTER TABLE users ADD COLUMN 1v1_count INT DEFAULT 0;")
+            cursor.execute("ALTER TABLE users ADD COLUMN ones_count INT DEFAULT 0;")
         except psycopg2.errors.DuplicateColumn:
             conn.rollback()
 
