@@ -715,7 +715,7 @@ async def add_reward_discord_command(
 
     await interaction.response.defer(ephemeral=True) 
     
-    # 2. Get the recipient's Twitch username using their Discord ID
+    # 2. Get the recipient's Twitch username 
     twitch_name = get_user_registration(member.id)
     
     if twitch_name is None:
@@ -726,12 +726,12 @@ async def add_reward_discord_command(
         )
         return
         
-    # Get the database column name from the choice value
+    # Get the database column name and the display name
     reward_column = reward.value 
     reward_name = reward.name
     
     # 3. Call the synchronous DB function (Uses the fetched twitch_name)
-    success, message = increment_user_reward(twitch_name, reward_column)
+    success, message = increment_user_reward(twitch_name, reward_column, reward_name)
 
     # 4. Send the response
     if success:
@@ -790,12 +790,12 @@ async def remove_reward_discord_command(
         )
         return
         
-    # Get the database column name from the choice value
+    # Get the database column name and the display name
     reward_column = reward.value 
     reward_name = reward.name
     
     # 3. Call the synchronous DB function (Uses the fetched twitch_name)
-    success, message = decrement_user_reward(twitch_name, reward_column)
+    success, message = decrement_user_reward(twitch_name, reward_column, reward_name)
 
     # 4. Send the response
     if success:
@@ -842,12 +842,12 @@ async def add_reward_twitch_command(
     # Defer the response as we are talking to the database
     await interaction.response.defer(ephemeral=True) 
     
-    # Get the database column name from the choice value
+    # Get the database column name and the display name
     reward_column = reward.value 
     reward_name = reward.name
     
     # 2. Call the synchronous DB function (Uses the input twitch_name)
-    success, message = increment_user_reward(twitch_name.strip(), reward_column)
+    success, message = increment_user_reward(twitch_name.strip(), reward_column, reward_name)
 
     # 3. Send the response
     if success:
@@ -897,12 +897,12 @@ async def remove_reward_twitch_command(
     # Defer the response as we are talking to the database
     await interaction.response.defer(ephemeral=True) 
     
-    # Get the database column name from the choice value
+    # Get the database column name and the display name
     reward_column = reward.value 
     reward_name = reward.name
     
     # 2. Call the synchronous DB function (Uses the input twitch_name)
-    success, message = decrement_user_reward(twitch_name.strip(), reward_column)
+    success, message = decrement_user_reward(twitch_name.strip(), reward_column, reward_name)
 
     # 3. Send the response
     if success:
