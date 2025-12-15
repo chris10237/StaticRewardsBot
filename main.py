@@ -4,7 +4,8 @@ import os
 import asyncio
 from flask import Flask
 import threading
-import psycopg2 
+import psycopg2
+import datetime
 
 from discord import app_commands
 
@@ -174,6 +175,28 @@ def setup_db():
         except psycopg2.errors.DuplicateColumn:
             conn.rollback()
         # --- END REWARD COLUMN LOGIC ---
+
+        # --- LOGGING COLUMNS ---
+
+        try:
+            # 1. Stores the MOST recent activity
+            cursor.execute("ALTER TABLE users ADD COLUMN log_recent_1 VARCHAR(255);")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback() 
+
+        try:
+            # 2. Stores the SECOND most recent activity
+            cursor.execute("ALTER TABLE users ADD COLUMN log_recent_2 VARCHAR(255);")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback() 
+
+        try:
+            # 3. Stores the THIRD most recent activity
+            cursor.execute("ALTER TABLE users ADD COLUMN log_recent_3 VARCHAR(255);")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+
+        # --- END LOGGING COLUMNS ---
             
         conn.commit()
         print("Database table 'users' setup and commit complete.")
@@ -275,10 +298,12 @@ def get_user_rewards(discord_id: int) -> dict | None:
 
     # Get the list of all reward column names for the SELECT query
     reward_columns = VALID_REWARD_COLUMNS
+
+    select_columns = reward_columns + ['log_recent_1', 'log_recent_2', 'log_recent_3']
     
     # We select the discord_id and all reward columns
     select_query = f"""
-    SELECT discord_id, {', '.join(reward_columns)} 
+    SELECT discord_id, {', '.join(select_columns)} 
     FROM users
     WHERE discord_id = %s;
     """
@@ -346,6 +371,8 @@ def increment_user_reward(twitch_username: str, reward_column: str):
         cursor.execute(update_query, (discord_id,))
         new_count = cursor.fetchone()[0] # Get the updated count
         conn.commit()
+
+        update_activity_log(discord_id, reward_name_display, '+')
         
         return True, f"Reward incremented! New count for '{reward_column}' is **{new_count}**."
         
@@ -403,6 +430,8 @@ def decrement_user_reward(twitch_username: str, reward_column: str):
         cursor.execute(update_query, (discord_id,))
         new_count = cursor.fetchone()[0] # Get the updated count
         conn.commit()
+
+        update_activity_log(discord_id, reward_name_display, '-')
         
         return True, f"Reward decremented! New count for '{reward_column}' is **{new_count}**."
             
@@ -411,6 +440,42 @@ def decrement_user_reward(twitch_username: str, reward_column: str):
         print(f"Error decrementing reward for {twitch_username}: {e}")
         return False, f"An unexpected database error occurred: {e}"
             
+    finally:
+        cursor.close()
+        conn.close()
+
+def update_activity_log(discord_id: int, reward_name_display: str, change_type: str):
+    """
+    Creates a new log string, shifts the old logs (3 -> 2, 2 -> 1), and inserts the new log into 1.
+    """
+    conn = get_db_connection()
+    if not conn:
+        print("Failed to update activity log: DB connection failed.")
+        return
+
+    cursor = conn.cursor()
+    try:
+        # 1. Format the new log string: "MM/DD +/- Reward Name"
+        date_str = datetime.datetime.now().strftime("%m/%d")
+        new_log_string = f"• **{date_str}** `{change_type}` {reward_name_display}"
+
+        # 2. SQL to shift the columns and insert the new value.
+        #    log_recent_3 gets the old log_recent_2 value.
+        #    log_recent_2 gets the old log_recent_1 value.
+        #    log_recent_1 gets the new log string.
+        update_query = """
+        UPDATE users 
+        SET 
+            log_recent_3 = log_recent_2,
+            log_recent_2 = log_recent_1,
+            log_recent_1 = %s 
+        WHERE discord_id = %s;
+        """
+        cursor.execute(update_query, (new_log_string, discord_id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"Error updating activity log for {discord_id}: {e}")
     finally:
         cursor.close()
         conn.close()
@@ -511,6 +576,21 @@ async def my_rewards_command(interaction: discord.Interaction):
         
         if count > 0:
             reward_list.append(f"• **{display_name}:** {count}")
+
+    # Retrieve the three log strings, filtering out None/empty strings
+    activity_logs = [
+        user_rewards.get('log_recent_1'),
+        user_rewards.get('log_recent_2'),
+        user_rewards.get('log_recent_3')
+    ]
+
+    # Filter out any None or empty strings from the list
+    log_messages = [log for log in activity_logs if log]
+
+    if log_messages:
+        log_field = "\n".join(log_messages)
+    else:
+        log_field = "*No recent reward activity found.*"
             
     # 2) Print out a list of rewards
     if reward_list:
@@ -522,14 +602,23 @@ async def my_rewards_command(interaction: discord.Interaction):
             color=discord.Color.gold()
         )
         embed.add_field(name="Available Rewards", value=rewards_text, inline=False)
+        embed.add_field(name="Recent Reward Activity (Last 3)", value=log_field, inline=False)
         embed.set_footer(text="Let Static know when you want to use them!")
 
         await interaction.followup.send(embed=embed, ephemeral=True)
         
     # 3) Tell them their rewards inventory is empty
     else:
+        # Show activity even if inventory is empty
+        embed = discord.Embed(
+            title=f"🎁 {interaction.user.name}'s Reward Inventory",
+            description="📦 **Inventory Empty!** You are registered, but currently have no available rewards to claim.",
+            color=discord.Color.red()
+        )
+        embed.add_field(name="Recent Reward Activity (Last 3)", value=log_field, inline=False)
+        
         await interaction.followup.send(
-            "📦 **Inventory Empty!** You are registered, but currently have no available rewards to claim.",
+            embed=embed,
             ephemeral=True
         )
 
