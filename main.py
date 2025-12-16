@@ -57,6 +57,46 @@ def get_db_connection():
         print(f"FATAL ERROR: Failed to connect to database: {e}")
         return None
 
+def log_reward_activity(discord_id: int, log_message: str):
+    """
+    Performs the log rotation (shifts log 1 to 2, 2 to 3, and writes new log to 1).
+    """
+    conn = get_db_connection()
+    if not conn:
+        print(f"Failed to log activity for {discord_id}: DB connection failed.")
+        return
+
+    cursor = conn.cursor()
+    
+    # 1. Format the new log entry with the current timestamp
+    # We use a concise format to save space: M-D H:M
+    timestamp = datetime.now().strftime("%m-%d %H:%M") 
+    
+    # Prepend the timestamp to the message. The color/sign is already in the message.
+    full_log_entry = f"**[{timestamp}]** {log_message}" 
+    
+    try:
+        # The rotation query: Shift 2->3, 1->2, then insert the new entry into 1
+        update_query = """
+        UPDATE users
+        SET
+            log_recent_3 = log_recent_2,
+            log_recent_2 = log_recent_1,
+            log_recent_1 = %s
+        WHERE
+            discord_id = %s;
+        """
+        cursor.execute(update_query, (full_log_entry, discord_id))
+        conn.commit()
+        
+    except Exception as e:
+        conn.rollback()
+        print(f"FATAL ERROR logging activity for {discord_id}: {e}")
+        
+    finally:
+        cursor.close()
+        conn.close()
+
 def setup_db():
     """
     Creates the 'users' table if it doesn't already exist and ensures a
@@ -174,6 +214,24 @@ def setup_db():
         except psycopg2.errors.DuplicateColumn:
             conn.rollback()
         # --- END REWARD COLUMN LOGIC ---
+
+        # --- LOG COLUMN LOGIC ---
+        try:
+            # log_recent_1, log_recent_2, log_recent_3 are TEXT columns (default to NULL)
+            cursor.execute("ALTER TABLE users ADD COLUMN log_recent_1 TEXT;")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN log_recent_2 TEXT;")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN log_recent_3 TEXT;")
+        except psycopg2.errors.DuplicateColumn:
+            conn.rollback()
+        # --- END LOG COLUMN LOGIC ---
             
         conn.commit()
         print("Database table 'users' setup and commit complete.")
@@ -342,10 +400,16 @@ def increment_user_reward(twitch_username: str, reward_column: str):
         WHERE discord_id = %s
         RETURNING {reward_column};
         """
+
+        # We need the user-friendly reward name, so we look it up from the column value
+        reward_name = next(c.name for c in REWARD_CHOICES if c.value == reward_column)
         
         cursor.execute(update_query, (discord_id,))
         new_count = cursor.fetchone()[0] # Get the updated count
         conn.commit()
+
+        log_msg = f"🟢 '{reward_name}' added to inventory."
+        log_reward_activity(discord_id, log_msg)
         
         return True, f"Reward incremented! New count for '{reward_column}' is **{new_count}**."
         
@@ -399,10 +463,16 @@ def decrement_user_reward(twitch_username: str, reward_column: str):
         WHERE discord_id = %s
         RETURNING {reward_column};
         """
+
+        # We need the user-friendly reward name, so we look it up from the column value
+        reward_name = next(c.name for c in REWARD_CHOICES if c.value == reward_column)
         
         cursor.execute(update_query, (discord_id,))
         new_count = cursor.fetchone()[0] # Get the updated count
         conn.commit()
+
+        log_msg = f"🔴 '{reward_name}' removed from inventory."
+        log_reward_activity(discord_id, log_msg)
         
         return True, f"Reward decremented! New count for '{reward_column}' is **{new_count}**."
             
@@ -522,6 +592,23 @@ async def my_rewards_command(interaction: discord.Interaction):
             color=discord.Color.gold()
         )
         embed.add_field(name="Available Rewards", value=rewards_text, inline=False)
+
+        log_text = ""
+        log1 = user_rewards.get("log_recent_1")
+        log2 = user_rewards.get("log_recent_2")
+        log3 = user_rewards.get("log_recent_3")
+        
+        # Build the log message, skipping any null/empty entries.
+        # The log entries are already formatted with the timestamp and color.
+        log_entries = [log for log in [log1, log2, log3] if log]
+            
+        if log_entries:
+            # Join with a newline to list them clearly
+            log_text = "\n".join(log_entries)
+            embed.add_field(name="Recent Activity Log (Max 3)", value=log_text.strip(), inline=False)
+        else:
+            embed.add_field(name="Recent Activity Log", value="No recent activity logged.", inline=False)
+        
         embed.set_footer(text="Let Static know when you want to use them!")
 
         await interaction.followup.send(embed=embed, ephemeral=True)
