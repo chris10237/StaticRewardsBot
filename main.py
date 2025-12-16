@@ -6,6 +6,7 @@ from flask import Flask
 import threading
 import psycopg2 
 from datetime import datetime
+import pytz
 
 from discord import app_commands
 
@@ -68,10 +69,14 @@ def log_reward_activity(discord_id: int, log_message: str):
         return
 
     cursor = conn.cursor()
+
+    eastern_time_zone = pytz.timezone('America/New_York')
+
+    now_et = datetime.now(eastern_time_zone)
     
     # 1. Format the new log entry with the current timestamp
     # We use a concise format to save space: M-D H:M
-    timestamp = datetime.now().strftime("%m-%d %H:%M") 
+    timestamp = now_et.strftime("%m-%d %H:%M %Z") # %Z gives the timezone name (EST/EDT)
     
     # Prepend the timestamp to the message. The color/sign is already in the message.
     full_log_entry = f"**[{timestamp}]** {log_message}" 
