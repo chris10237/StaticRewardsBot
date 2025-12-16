@@ -980,7 +980,7 @@ async def hello_command(interaction: discord.Interaction):
     await asyncio.sleep(0.5)
 
     # Use followup.send() after deferring
-    await interaction.followup.send(f"Hello, {interaction.user.name}! This bot keeps track of your channel point rewards in Static's stream. If Static hasn't manually entered you into the database yet, you can use /register and enter your Twitch name. It doesn't have to be exact, it's just for Static to type in when he's adding/removing rewards to your account. After that it's extremely straightforward - simply use /my-rewards to view rewards you have in the stream!", ephemeral=False)
+    await interaction.followup.send(f"Hello, {interaction.user.name}! This bot keeps track of your channel point rewards in Static's stream. If Static hasn't manually entered you into the database yet, you can use /register and enter your Twitch name. It doesn't have to be exact, it's just for Static to type in when he's adding/removing rewards to your account. After that it's extremely straightforward - simply use /my-rewards to view rewards you have in the stream! Or, use /display-rewards to view another users rewards!", ephemeral=False)
 
 @bot.tree.command(
     guild=discord.Object(id=GUILD_ID),
