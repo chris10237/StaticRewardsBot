@@ -324,7 +324,7 @@ def get_user_registration(discord_id: int):
 
 def get_user_rewards(discord_id: int) -> dict | None:
     """
-    Retrieves the user's reward counts from the database, returned as a dictionary.
+    Retrieves the user's reward counts AND log entries, returned as a dictionary.
     Returns None if the user is not found.
     """
     conn = get_db_connection()
@@ -332,12 +332,16 @@ def get_user_rewards(discord_id: int) -> dict | None:
         print("Database connection failed in get_user_rewards.")
         return None
 
-    # Get the list of all reward column names for the SELECT query
+    # Get the list of all reward column names
     reward_columns = VALID_REWARD_COLUMNS
     
-    # We select the discord_id and all reward columns
+    log_columns = ["log_recent_1", "log_recent_2", "log_recent_3"]
+    
+    # Combine reward and log columns for the SELECT query
+    all_columns = reward_columns + log_columns
+    
     select_query = f"""
-    SELECT discord_id, {', '.join(reward_columns)} 
+    SELECT discord_id, {', '.join(all_columns)} 
     FROM users
     WHERE discord_id = %s;
     """
