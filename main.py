@@ -996,27 +996,25 @@ async def goodbye_command(interaction: discord.Interaction):
 # --- 3. Flask Web Server Setup ---
 app = Flask(__name__) # The Flask application instance is named 'app'
 
+@app.route('/')
+def home():
+    return "Discord Bot is Online and Healthy!"
+
 # --- 4. Discord Bot Runner Function ---
 def start_bot():
-    """Starts the Discord bot client in a dedicated thread."""
-    print("Starting Discord Bot in a new thread...")
+    print("Starting Discord Bot...")
     try:
+        # We use asyncio.run to ensure the loop is handled correctly
         bot.run(token, log_handler=None)
-    except discord.LoginFailure:
-        print("FATAL ERROR: Bot login failed. Check your DISCORD_TOKEN.")
     except Exception as e:
         print(f"FATAL STARTUP ERROR: {e}")
 
-# --- 5. Flask Bot Integration ---
-@app.before_request
-def run_bot_on_start():
-    """Launches the bot thread right before the web server begins serving."""
-    if not any(t.name == "discord_bot_thread" for t in threading.enumerate()):
-        t = threading.Thread(target=start_bot, name="discord_bot_thread")
-        t.start()
-        print("Discord Bot thread initiated successfully.")
-
-@app.route('/')
-def home():
-    """Health check endpoint required by Render."""
-    return "Discord Bot is Online and Healthy!"
+# --- 5. Start the thread globally, NOT in before_request ---
+if __name__ == "__main__":
+    # Start the bot thread ONCE when the script starts
+    t = threading.Thread(target=start_bot, daemon=True)
+    t.start()
+    
+    # Get the port from environment (Render requirement)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
