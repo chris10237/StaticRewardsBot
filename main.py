@@ -994,37 +994,19 @@ async def goodbye_command(interaction: discord.Interaction):
     await interaction.followup.send(f"fuk u {interaction.user.name}! (Goodbye message)", ephemeral=False)
 
 # --- 3. Flask Web Server Setup ---
-app = Flask(__name__) # The Flask application instance is named 'app'
+app = Flask(__name__)
+
+# This function will start the bot ONLY ONCE
+def start_discord_bot():
+    if not any(t.name == "discord_bot_thread" for t in threading.enumerate()):
+        t = threading.Thread(target=start_bot, name="discord_bot_thread", daemon=True)
+        t.start()
+        print("Discord Bot thread started via Gunicorn worker.")
+
+# We call it here so it runs when Gunicorn loads the 'app' object
+setup_db()
+start_discord_bot()
 
 @app.route('/')
 def home():
-    return "Discord Bot is Online and Healthy!"
-
-# --- 4. Discord Bot Runner Function ---
-def start_bot():
-    print("Starting Discord Bot...")
-    try:
-        # We use asyncio.run to ensure the loop is handled correctly
-        bot.run(token, log_handler=None)
-    except Exception as e:
-        print(f"FATAL STARTUP ERROR: {e}")
-
-# --- 5. Revised Startup Logic ---
-if __name__ == "__main__":
-    # 1. Setup Database first
-    setup_db()
-
-    # 2. Define the thread
-    # Note: daemon=True ensures the thread dies if the main app stops
-    t = threading.Thread(target=start_bot, daemon=True)
-    
-    # 3. Start the thread BEFORE running Flask
-    t.start()
-    print("Background thread started. Initializing Flask...")
-
-    # 4. Run Flask (This must be the LAST line)
-    # Render provides the PORT env var; default to 10000
-    port = int(os.environ.get("PORT", 10000))
-    
-    # IMPORTANT: debug=False is required when using threading
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    return "Bot is running!"
