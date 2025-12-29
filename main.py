@@ -996,6 +996,16 @@ async def goodbye_command(interaction: discord.Interaction):
 # --- 3. Flask Web Server Setup ---
 app = Flask(__name__)
 
+def start_bot():
+    """Starts the Discord bot client in a dedicated thread."""
+    print("Starting Discord Bot in a new thread...")
+    try:
+        bot.run(token, log_handler=None)
+    except discord.LoginFailure:
+        print("FATAL ERROR: Bot login failed. Check your DISCORD_TOKEN.")
+    except Exception as e:
+        print(f"FATAL STARTUP ERROR: {e}")
+
 # This function will start the bot ONLY ONCE
 def start_discord_bot():
     if not any(t.name == "discord_bot_thread" for t in threading.enumerate()):
