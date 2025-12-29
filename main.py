@@ -1006,17 +1006,20 @@ def start_bot():
     except Exception as e:
         print(f"FATAL STARTUP ERROR: {e}")
 
-# This function will start the bot ONLY ONCE
-def start_discord_bot():
-    if not any(t.name == "discord_bot_thread" for t in threading.enumerate()):
-        t = threading.Thread(target=start_bot, name="discord_bot_thread", daemon=True)
-        t.start()
-        print("Discord Bot thread started via Gunicorn worker.")
+# --- 5. Integrated Startup Sequence ---
 
-# We call it here so it runs when Gunicorn loads the 'app' object
+# 1. Run Database setup immediately
+# We do this here so it finishes BEFORE the web server starts
 setup_db()
-start_discord_bot()
 
+# 2. Start the Discord Bot in the background
+# We name it so we can find it in the thread list if needed
+print("Main Process: Launching Discord background thread...")
+t = threading.Thread(target=start_bot, name="discord_bot_thread", daemon=True)
+t.start()
+
+# 3. Define the Flask Routes
 @app.route('/')
 def home():
-    return "Bot is running!"
+    """Health check endpoint required by Render."""
+    return "Discord Bot is Online and Healthy!", 200
