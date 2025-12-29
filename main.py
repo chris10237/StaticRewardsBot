@@ -1008,18 +1008,17 @@ def start_bot():
 
 # --- 5. Integrated Startup Sequence ---
 
-# 1. Run Database setup immediately
-# We do this here so it finishes BEFORE the web server starts
-setup_db()
+def run_everything():
+    # We move setup_db INSIDE the thread so it doesn't block Gunicorn
+    setup_db() 
+    start_bot()
 
-# 2. Start the Discord Bot in the background
-# We name it so we can find it in the thread list if needed
-print("Main Process: Launching Discord background thread...")
-t = threading.Thread(target=start_bot, name="discord_bot_thread", daemon=True)
+# 1. Start the Discord Bot AND DB Setup in the background
+print("Main Process: Launching Background Tasks...")
+t = threading.Thread(target=run_everything, name="discord_bot_thread", daemon=True)
 t.start()
 
-# 3. Define the Flask Routes
+# 2. Define the Flask Routes (This happens instantly now!)
 @app.route('/')
 def home():
-    """Health check endpoint required by Render."""
-    return "Discord Bot is Online and Healthy!", 200
+    return "Bot is online", 200
