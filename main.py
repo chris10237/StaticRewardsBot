@@ -1009,12 +1009,22 @@ def start_bot():
     except Exception as e:
         print(f"FATAL STARTUP ERROR: {e}")
 
-# --- 5. Start the thread globally, NOT in before_request ---
+# --- 5. Revised Startup Logic ---
 if __name__ == "__main__":
-    # Start the bot thread ONCE when the script starts
+    # 1. Setup Database first
+    setup_db()
+
+    # 2. Define the thread
+    # Note: daemon=True ensures the thread dies if the main app stops
     t = threading.Thread(target=start_bot, daemon=True)
-    t.start()
     
-    # Get the port from environment (Render requirement)
+    # 3. Start the thread BEFORE running Flask
+    t.start()
+    print("Background thread started. Initializing Flask...")
+
+    # 4. Run Flask (This must be the LAST line)
+    # Render provides the PORT env var; default to 10000
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    
+    # IMPORTANT: debug=False is required when using threading
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
