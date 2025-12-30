@@ -997,14 +997,13 @@ async def goodbye_command(interaction: discord.Interaction):
 app = Flask(__name__)
 
 def start_bot():
-    """Starts the Discord bot client in a dedicated thread."""
-    print("Starting Discord Bot in a new thread...")
+    """Starts the Discord bot with explicit logging to see why it's failing."""
+    print("Starting Discord Bot thread... attempting login.")
     try:
-        bot.run(token, log_handler=None)
-    except discord.LoginFailure:
-        print("FATAL ERROR: Bot login failed. Check your DISCORD_TOKEN.")
+        # We re-enable the log_handler to see the Discord errors in Render logs
+        bot.run(token) 
     except Exception as e:
-        print(f"FATAL STARTUP ERROR: {e}")
+        print(f"DISCORD THREAD ERROR: {e}")
 
 # --- 5. Integrated Startup Sequence ---
 
