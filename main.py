@@ -5,6 +5,7 @@ import os
 import threading
 from contextlib import contextmanager
 from datetime import datetime
+from typing import NamedTuple
 
 import discord
 import psycopg2
@@ -50,6 +51,41 @@ REWARD_CHOICES = [
 REWARD_NAMES = {choice.value: choice.name for choice in REWARD_CHOICES}
 VALID_REWARD_COLUMNS = list(REWARD_NAMES)
 LOG_COLUMNS = ("log_recent_1", "log_recent_2", "log_recent_3")
+
+# Trade-in rules. Each line says "qty_a of reward_a is worth qty_b of reward_b".
+# Every rule works in BOTH directions (e.g. 3 watch videos -> 1 tier list, and 1 tier list ->
+# 3 watch videos). Keep the ratios consistent with each other, otherwise users could trade
+# in a loop to generate free rewards.
+TRADE_EQUIVALENTS = [
+    ("watch_video_count", 3, "tier_list_count", 1),
+    ("watch_video_count", 6, "replay_analysis_count", 1),
+    ("tier_list_count", 2, "replay_analysis_count", 1),
+]
+
+
+class Trade(NamedTuple):
+    give: str      # column the user pays with
+    give_qty: int
+    get: str       # column the user receives
+    get_qty: int
+
+
+def _build_trades() -> dict[str, Trade]:
+    trades = {}
+    for col_a, qty_a, col_b, qty_b in TRADE_EQUIVALENTS:
+        for trade in (Trade(col_a, qty_a, col_b, qty_b), Trade(col_b, qty_b, col_a, qty_a)):
+            trades[f"{trade.give}>{trade.get}"] = trade
+    return trades
+
+
+TRADES = _build_trades()  # key like "watch_video_count>tier_list_count" -> Trade
+TRADE_CHOICES = [
+    app_commands.Choice(
+        name=f"{t.give_qty}× {REWARD_NAMES[t.give]} → {t.get_qty}× {REWARD_NAMES[t.get]}",
+        value=key,
+    )
+    for key, t in TRADES.items()
+]  # Discord allows at most 25 choices
 
 # =============================================================================
 # Bot setup
@@ -293,6 +329,60 @@ def adjust_user_reward(twitch_username: str, reward_column: str, delta: int) -> 
         return False, f"An unexpected database error occurred: {e}"
 
 
+def trade_in_rewards(discord_id: int, trade: Trade, times: int) -> tuple[bool, str]:
+    """
+    Trades in rewards from the user's own inventory. Checks the balance, swaps the counts,
+    and logs it, all in one transaction (the row is locked so double-clicks can't overspend).
+    Returns (success, message).
+    """
+    cost = trade.give_qty * times
+    gain = trade.get_qty * times
+    give_name = REWARD_NAMES[trade.give]
+    get_name = REWARD_NAMES[trade.get]
+    give_col = sql.Identifier(trade.give)
+    get_col = sql.Identifier(trade.get)
+
+    try:
+        with db_cursor() as cursor:
+            cursor.execute(
+                sql.SQL("SELECT {} FROM users WHERE discord_id = %s FOR UPDATE;").format(give_col),
+                (discord_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return False, "You aren't registered yet. Use `/register` first."
+
+            have = row[0] or 0
+            if have < cost:
+                return False, (
+                    f"Not enough rewards. This trade needs **{cost}× {give_name}**, "
+                    f"but you only have **{have}**."
+                )
+
+            cursor.execute(
+                sql.SQL(
+                    "UPDATE users "
+                    "SET {give} = COALESCE({give}, 0) - %s, {get} = COALESCE({get}, 0) + %s "
+                    "WHERE discord_id = %s RETURNING {give}, {get};"
+                ).format(give=give_col, get=get_col),
+                (cost, gain, discord_id),
+            )
+            new_give, new_get = cursor.fetchone()
+
+            append_reward_log(cursor, discord_id, f"🔄 Traded {cost}× '{give_name}' for {gain}× '{get_name}'.")
+
+        return True, (
+            f"You traded **{cost}× {give_name}** for **{gain}× {get_name}**.\n"
+            f"You now have **{new_give}× {give_name}** and **{new_get}× {get_name}**."
+        )
+
+    except DatabaseUnavailable:
+        return False, "Database connection failed."
+    except Exception as e:
+        print(f"Error trading rewards for {discord_id}: {e}")
+        return False, "An unexpected database error occurred. Please try again later."
+
+
 # --- Keeping the (free-tier) database from pausing ---
 
 def ping_database() -> bool:
@@ -489,13 +579,23 @@ async def display_rewards_command(interaction: discord.Interaction, member: disc
 async def help_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
     await asyncio.sleep(0.5)
+    # Built from TRADE_EQUIVALENTS so the help text never goes out of date.
+    trade_rates = "\n".join(
+        f"• {qty_a} {REWARD_NAMES[col_a]} = {qty_b} {REWARD_NAMES[col_b]}"
+        for col_a, qty_a, col_b, qty_b in TRADE_EQUIVALENTS
+    )
+
     await interaction.followup.send(
         f"Hello, {interaction.user.name}! This bot keeps track of your channel point rewards in "
         f"Static's stream. If Static hasn't manually entered you into the database yet, you can use "
         f"/register and enter your Twitch name. It doesn't have to be exact, it's just for Static to "
         f"type in when he's adding/removing rewards to your account. After that it's extremely "
         f"straightforward - simply use /my-rewards to view rewards you have in the stream! Or, use "
-        f"/display-rewards to view another users rewards!",
+        f"/display-rewards to view another users rewards!\n\n"
+        f"**Trading rewards:** Want a different reward? Use /trade to swap rewards you already have "
+        f"for others, as long as you have enough. Pick a trade from the list, and optionally how many "
+        f"times to do it. Trades work both ways, and the current rates are:\n"
+        f"{trade_rates}",
         ephemeral=False,
     )
 
@@ -505,6 +605,29 @@ async def goodbye_command(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
     await asyncio.sleep(0.5)
     await interaction.followup.send(f"fuk u {interaction.user.name}! (Goodbye message)", ephemeral=False)
+
+
+@bot.tree.command(guild=GUILD, name="trade", description="Trade in some of your rewards for different ones.")
+@app_commands.describe(
+    trade="Which trade you want to make.",
+    times="How many times to make this trade (default 1).",
+)
+@app_commands.choices(trade=TRADE_CHOICES)
+async def trade_command(
+    interaction: discord.Interaction,
+    trade: app_commands.Choice[str],
+    times: app_commands.Range[int, 1, 25] = 1,
+):
+    await interaction.response.defer(ephemeral=True)
+
+    success, message = await asyncio.to_thread(
+        trade_in_rewards, interaction.user.id, TRADES[trade.value], times
+    )
+
+    if success:
+        await interaction.followup.send(f"✅ **Trade Complete!**\n{message}", ephemeral=True)
+    else:
+        await interaction.followup.send(f"❌ **Trade Failed:** {message}", ephemeral=True)
 
 
 # =============================================================================
