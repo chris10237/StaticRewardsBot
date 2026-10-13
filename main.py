@@ -95,7 +95,10 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-bot = commands.Bot(command_prefix=None, intents=intents)
+# This bot only uses slash commands, so there are no text-prefix commands. discord.py
+# still requires a valid prefix, though (None raises an error on every message), so we use
+# "@mention" as a harmless placeholder.
+bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
 
 # =============================================================================
 # Database helpers
